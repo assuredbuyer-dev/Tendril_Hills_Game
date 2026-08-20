@@ -1,0 +1,39 @@
+; Engine configuration file.
+; Tendril Hills — 3D clay build | Tendrel Studios
+; Open with Godot 4.5+  (Import > select this file)
+
+config_version=5
+
+[application]
+
+config/name="Tendril Hills"
+config/description="A cozy clay farming world — Tendrel Studios"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.5", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[autoload]
+
+Controls="*res://autoload/controls.gd"
+SaveManager="*res://autoload/save_manager.gd"
+Sfx="*res://autoload/sfx.gd"
+GameState="*res://autoload/game_state.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[physics]
+
+3d/default_gravity=24.0
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=1
+anti_aliasing/quality/msaa_3d=2
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3

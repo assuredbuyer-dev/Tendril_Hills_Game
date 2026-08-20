@@ -1,0 +1,27 @@
+# =============================================================
+# Tendril Hills — what git should ignore
+# -------------------------------------------------------------
+# Rule of thumb: if Godot can regenerate it, it does not belong in
+# the repo. Everything else is source and should be committed.
+# =============================================================
+
+# Godot's cache: reimported textures, shader cache, the global class
+# registry. Regenerated on first open, different on every machine,
+# and a guaranteed source of merge conflicts. NEVER commit this.
+.godot/
+
+# Screenshot scratch from tools/shots.sh — always the current build,
+# never history.
+.shots/
+
+# Build output
+export/
+build/
+*.dmg
+*.zip
+*.app
+
+# macOS / editor litter
+.DS_Store
+*.swp
+*~
