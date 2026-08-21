@@ -412,6 +412,8 @@ func _do_interact() -> void:
 			_talk_to_sprout()
 		"portal":
 			_examine_portal()
+		"homestead":
+			_read_signpost(int(_current_target["index"]))
 
 
 func _talk_to_sprout() -> void:
@@ -426,6 +428,30 @@ func _talk_to_sprout() -> void:
 	# advance when you actually do them.
 	if String(step["id"]) in ["welcome", "gift", "wait", "free"]:
 		GameState.advance_onboarding_manually()
+
+
+## The signpost at a homestead. Tells you where you are and how
+## your own soil is doing, so a clearing on the far side of the
+## map is a place with a name rather than a patch of grass.
+func _read_signpost(index: int) -> void:
+	var hs: Dictionary = Terrain.HOMESTEADS[index]
+	var first := GameState.PLOT_COLS * GameState.PLOT_ROWS \
+		+ index * GameState.HOMESTEAD_COLS * GameState.HOMESTEAD_ROWS
+	var last := first + GameState.HOMESTEAD_COLS * GameState.HOMESTEAD_ROWS
+	var working := 0
+	var ripe := 0
+	for i in range(first, mini(last, GameState.plots.size())):
+		var st: int = int(GameState.plots[i]["state"])
+		if st != GameState.Soil.UNTILLED:
+			working += 1
+		if st == GameState.Soil.READY:
+			ripe += 1
+	var line := "Untouched ground. Turn over some soil and make it yours."
+	if ripe > 0:
+		line = "%d of your %d patches are ready to pull." % [ripe, working]
+	elif working > 0:
+		line = "%d patches worked. Nothing ripe yet — give it time." % working
+	GameState.say.emit(String(hs["name"]), line)
 
 
 func _examine_portal() -> void:

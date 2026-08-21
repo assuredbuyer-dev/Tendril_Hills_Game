@@ -1,0 +1,57 @@
+# =============================================================
+# Runs tools/selftest.sh on every push, in headless Godot.
+# -------------------------------------------------------------
+# WHY: several people are committing to this repo now. Without this,
+# a broken recipe or a typo'd function name reaches everyone else's
+# next pull and costs them an evening. This catches it in about two
+# minutes and puts a red X on the commit that did it.
+#
+# The version below must match the Godot everyone is actually running.
+# One line to change when you all upgrade.
+# =============================================================
+name: Self-test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.7.1-stable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the Godot download
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}
+
+      - name: Fetch Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/godot && cd ~/godot
+          curl -sSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          unzip -qo godot.zip
+          mv "Godot_v${GODOT_VERSION}_linux.x86_64" godot
+          chmod +x godot
+          rm godot.zip
+
+      # A fresh checkout has no .godot/ cache, so global class names
+      # (Palette, Defs, Props...) do not resolve until an import runs.
+      # Skipping this step fails with confusing "identifier not
+      # declared" errors that look like real bugs.
+      - name: Import the project
+        run: ~/godot/godot --path . --headless --import
+
+      - name: Run the self-test
+        env:
+          GODOT: /home/runner/godot/godot
+        run: ./tools/selftest.sh

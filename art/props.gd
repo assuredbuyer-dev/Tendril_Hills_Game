@@ -468,6 +468,63 @@ static func planter(seed_n: int = 0) -> Node3D:
 
 ## A signpost the player puts up themselves. Same shape as the ones
 ## already in the world, so a player-placed sign belongs.
+## A signpost with a name actually painted on it.
+##
+## sign_post() has three pressed clay lines standing in for lettering
+## you are not meant to read. Once there is a real word on the board
+## those lines only fight it, so this is a separate sculpt rather than
+## a flag on that one. Used for the homesteads — see World.HOMESTEADS.
+static func named_sign(text: String, tint: Color = Palette.CREAM) -> Node3D:
+	var n := Node3D.new()
+	n.name = "NamedSign"
+	n.add_child(ClayKit.stalk(Vector3(0.18, 1.20, 0.18), Palette.EARTH_DARK,
+		Vector3(0, 0.58, 0)))
+
+	var board := Node3D.new()
+	board.position = Vector3(0, 1.24, 0)
+	board.rotation_degrees = Vector3(-9, 0, 2)
+	board.add_child(ClayKit.slab(Vector3(1.86, 0.64, 0.14), Palette.EARTH_DARK,
+		Vector3.ZERO, {"wobble": 0.03}))
+	board.add_child(ClayKit.slab(Vector3(1.62, 0.46, 0.16), tint,
+		Vector3(0, 0.01, 0.0), {"wobble": 0.04, "grain": 0.16}))
+
+	# Shrink the lettering to fit the board rather than letting a long
+	# name run off both ends. Rough but reliable: a glyph averages a
+	# bit over half the font size wide. Rename a homestead to
+	# something enormous and it gets smaller, not broken.
+	const BOARD_TEXT_WIDTH := 1.44
+	var font_px := 128.0
+	var est_width: float = maxf(1.0, float(text.length())) * 0.55 * font_px
+	var px_size: float = minf(0.0030, BOARD_TEXT_WIDTH / est_width)
+
+	# Painted on BOTH faces, on purpose. A sign has a front, and
+	# whoever places it has to decide which way the front points --
+	# and then every player who walks up from the other side reads
+	# a blank brown board. Two labels cost one draw call and remove
+	# the whole question.
+	#
+	# Label3D draws on a quad facing local +Z, same as Sprite3D, so
+	# each one sits just proud of its face or it z-fights the board.
+	for face in [1.0, -1.0]:
+		var label := Label3D.new()
+		label.name = "Name+" if face > 0.0 else "Name-"
+		label.text = text
+		label.font_size = int(font_px)
+		label.pixel_size = px_size
+		label.modulate = Palette.UI_TEXT
+		label.outline_size = 0
+		label.position = Vector3(0, 0.01, 0.10 * face)
+		label.rotation_degrees.y = 0.0 if face > 0.0 else 180.0
+		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		label.shaded = false
+		label.double_sided = false
+		label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		board.add_child(label)
+
+	n.add_child(board)
+	return n
+
+
 static func player_sign() -> Node3D:
 	var n := sign_post(Vector3.ZERO, 0.0)
 	n.name = "PlayerSign"

@@ -49,6 +49,30 @@ func setup(main: Node3D) -> void:
 		{"name": "13_scarecrow", "pos": Vector3(11.0, 0, 5.4), "yaw": -0.5, "wait": 0.6},
 		# Nose-to-cap on a toadstool, to check the spots read.
 		{"name": "10_toadstool", "pos": Vector3(7.5, 0, 7.5),  "yaw": 0.9,  "wait": 0.6},
+
+		# --- the bigger map ---------------------------------------
+		# The long view. This is the shot that tells you whether the
+		# world reads as big or just as empty, and whether distant
+		# trees pop in (see World._fade). Look at the horizon, not
+		# at the Sprite.
+		{"name": "20_long_view", "bare": true,  "pos": Vector3(0, 0, 26.0),   "yaw": 3.14, "wait": 0.8},
+		{"name": "21_long_view_e", "bare": true,"pos": Vector3(-24.0, 0, 0),  "yaw": -1.57,"wait": 0.8},
+		# A homestead, arriving from the village — the angle a player
+		# actually approaches from.
+		{"name": "22_homestead", "bare": true,  "pos": Vector3(-26.0, 0, -26.0), "yaw": -2.36, "wait": 0.8},
+		# Standing in the middle of one, which is what it looks like
+		# when it is yours and still empty.
+		{"name": "23_homestead_in", "bare": true,"pos": Vector3(32.0, 0, 32.0), "yaw": 0.8,  "wait": 0.8},
+		# Face-on to a signpost, from the village side, to check the
+		# name is legible and pointed the right way.
+		{"name": "28_sign", "bare": true, "pos": Vector3(30.0, 0, 30.0), "yaw": 0.785, "wait": 0.8},
+		# The pockets. Each should read as somewhere before you know
+		# what it gives you.
+		{"name": "24_stonefall", "bare": true,  "pos": Vector3(0, 0, -40.0),   "yaw": 3.14, "wait": 0.8},
+		{"name": "25_grove", "bare": true,      "pos": Vector3(40.0, 0, 0),    "yaw": -1.57,"wait": 0.8},
+		{"name": "26_toadfen", "bare": true,    "pos": Vector3(0, 0, 40.0),    "yaw": 0.0,  "wait": 0.8},
+		# The rim, to check the bowl edge still reads at the new size.
+		{"name": "27_rim", "bare": true,        "pos": Vector3(-40.0, 0, 40.0),"yaw": -0.8, "wait": 0.8},
 	]
 	_run()
 
@@ -72,6 +96,9 @@ func _run() -> void:
 		# still buried in whatever it is about to push out of.
 		await get_tree().physics_frame
 		await get_tree().physics_frame
+		# Landscape shots turn the HUD off. Two thirds of the screen is
+		# interface, and you cannot judge a horizon you cannot see.
+		_main.hud.visible = not bool(shot.get("bare", false))
 		if bool(shot.get("hop", false)):
 			_main.player.hop()
 		await get_tree().create_timer(float(shot["wait"])).timeout

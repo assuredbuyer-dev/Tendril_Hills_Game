@@ -11,7 +11,11 @@
 class_name World
 extends Node3D
 
-const TERRAIN_RES := 84          # grid divisions across the whole world
+# Grid divisions across the whole world. This is a resolution, not
+# a size — it has to move with Terrain.HALF_SIZE or the ground goes
+# blocky the moment the map grows. At 168 across 136 m the quads are
+# about 0.8 m, same as they have always been.
+const TERRAIN_RES := 168
 
 # Physics layer 3. Nothing in the game collides with this — only the
 # player's SpringArm3D does. It exists so tall props can push the
@@ -39,6 +43,7 @@ func _ready() -> void:
 	_build_village()
 	_build_farm()
 	_build_portal()
+	_build_homesteads()
 	_build_forest_edge()
 	_build_scatter()
 	_rebuild_placed()
@@ -81,7 +86,11 @@ func _build_environment() -> void:
 	env.fog_enabled = true
 	env.fog_light_color = Palette.FOG_COLOR
 	env.fog_light_energy = 0.6
-	env.fog_density = 0.0022
+	# The world is twice as deep as it was, so distance has to do more
+	# work. Fog is also what hides the point where far scenery stops
+	# being drawn (see _fade) — turn one down and you must turn the
+	# other up, or trees start popping into existence in clear air.
+	env.fog_density = 0.0040
 	env.fog_sun_scatter = 0.2
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.16
@@ -98,7 +107,13 @@ func _build_environment() -> void:
 	sun.rotation_degrees = Vector3(-38, 128, 0)
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	sun.directional_shadow_max_distance = 70.0
+	# Shadows are the single most expensive thing here: every object
+	# inside this radius is drawn a SECOND time into the shadow map,
+	# so this number costs more draw calls than anything else on this
+	# page. Pulling it in from 70 to 58 while the world doubled is
+	# what kept the bigger map affordable — and by 58 m the fog has
+	# taken most of the contrast out of a shadow anyway.
+	sun.directional_shadow_max_distance = 58.0
 	sun.shadow_bias = 0.05
 	sun.shadow_normal_bias = 1.4
 	sun.light_specular = 0.15
@@ -187,6 +202,44 @@ func _ground_color(v: Vector3, patch: FastNoiseLite) -> Color:
 	var fz: float = absf(v.z - Terrain.FARM_CENTRE.z) - Terrain.FARM_HALF.y
 	var farm: float = 1.0 - smoothstep(-1.0, 2.5, maxf(fx, fz))
 	col = col.lerp(Palette.SOIL_DRY, farm * 0.5)
+	# Each homestead's turf leans toward that player's accent colour,
+	# and its soil patch goes dark like the shared farm. From the top
+	# of a hill you can tell whose clearing you are looking at.
+	for hi in Terrain.HOMESTEADS.size():
+		var hp: Vector3 = Terrain.HOMESTEADS[hi]["pos"]
+		var hd := Vector2(v.x - hp.x, v.z - hp.z).length()
+		var near: float = 1.0 - smoothstep(0.0, Terrain.HOMESTEAD_RADIUS + 2.0, hd)
+		if near <= 0.0:
+			continue
+		# Strong enough to see from the next hill, weak enough that
+		# the grass is still grass. Turned up twice already; if you
+		# turn it up again, check it from a distance, not from on top
+		# of it, or you will end up with a purple field.
+		col = col.lerp(HOMESTEAD_COLOURS[hi % HOMESTEAD_COLOURS.size()], near * 0.34)
+		var hf: Vector3 = Terrain.HOMESTEADS[hi]["farm"]
+		var gx: float = absf(v.x - hf.x) - Terrain.HOMESTEAD_FARM_HALF.x
+		var gz: float = absf(v.z - hf.z) - Terrain.HOMESTEAD_FARM_HALF.y
+		var patch_f: float = 1.0 - smoothstep(-1.0, 2.5, maxf(gx, gz))
+		col = col.lerp(Palette.SOIL_DRY, patch_f * 0.5)
+
+	# The pockets get their own ground, so you can tell what a place
+	# gives you before you are standing in it.
+	for pk in POCKETS:
+		var pc: Vector2 = pk["pos"]
+		var pdist := Vector2(v.x - pc.x, v.z - pc.y).length()
+		var inside: float = 1.0 - smoothstep(0.0, float(pk["radius"]) + 4.0, pdist)
+		if inside <= 0.0:
+			continue
+		var w: Vector3 = pk["weights"]
+		var tint: Color = Palette.MOSS_DARK
+		if w.y >= 0.5:
+			tint = Palette.STONE            # bare, scraped rock
+		elif w.z >= 0.5:
+			tint = Palette.EARTH_DARK       # leaf litter under the grove
+		else:
+			tint = Palette.SOIL_WET         # damp fen ground
+		col = col.lerp(tint, inside * 0.45)
+
 	# Cool moss creeping toward the portal.
 	var pd := Vector3(v.x, 0, v.z).distance_to(Terrain.PORTAL_POS)
 	col = col.lerp(Palette.SKY_BLUE, (1.0 - smoothstep(3.0, 9.0, pd)) * 0.18)
@@ -338,15 +391,114 @@ func _open_portal() -> void:
 
 
 # =============================================================
+#  Homesteads — one clearing per player
+# =============================================================
+# The layout lives in Terrain.HOMESTEADS. This function only
+# dresses what is already carved into the ground: a signpost with
+# the name on it, a low ring of stones so the clearing reads as
+# somewhere rather than just flat, and a path stone pointing home.
+#
+# Deliberately almost empty. The whole point of a homestead is
+# that the player fills it.
+func _build_homesteads() -> void:
+	for i in Terrain.HOMESTEADS.size():
+		var hs: Dictionary = Terrain.HOMESTEADS[i]
+		var c: Vector3 = hs["pos"]
+		var hue: Color = HOMESTEAD_COLOURS[i % HOMESTEAD_COLOURS.size()]
+
+		# The signpost, with the name on the board. Faces the village,
+		# so walking out to your own patch you read your name as you
+		# arrive rather than after you have walked past it.
+		var post := Props.named_sign(String(hs["name"]),
+			Palette.CREAM.lerp(hue, 0.30))
+		_solid(post, 0.3, 1.8)
+		# Rotating a node by yaw sends its local +Z to (sin y, cos y),
+		# and the board's readable face is its +Z. So aiming the sign
+		# at the village is atan2 of the vector TO the village, and
+		# no half-turn on top of it. Getting this wrong points every
+		# signpost out into the trees, which is easy to miss because
+		# the back of a sign looks like a sign.
+		var facing := rad_to_deg(atan2(-c.x, -c.z))
+		_place(post, c.x, c.z, facing)
+		_register(Vector3(c.x, 0, c.z), "homestead", i,
+			"Read the %s signpost" % String(hs["name"]), 2.2)
+
+		# A ring of low stones. Not a fence — a fence says keep out,
+		# and this is the opposite of that.
+		for j in 14:
+			var a := TAU * float(j) / 14.0 + float(i) * 0.4
+			# Leave the village-facing quarter open as a way in.
+			var to_village := atan2(-c.z, -c.x)
+			if absf(wrapf(a - to_village, -PI, PI)) < 0.55:
+				continue
+			var stone := Props.path_stone()
+			stone.scale = Vector3.ONE * _rng.randf_range(0.8, 1.25)
+			_fade(stone, 60.0)
+			_place(stone, c.x + cos(a) * Terrain.HOMESTEAD_RADIUS,
+				c.z + sin(a) * Terrain.HOMESTEAD_RADIUS, _rng.randf_range(0, 360))
+
+
+# One accent colour per homestead, in HOMESTEADS order, so each
+# kid's signpost is recognisable from across the valley.
+const HOMESTEAD_COLOURS := [
+	Palette.DEEP_RED, Palette.WARM_YELLOW, Palette.SKY_BLUE, Palette.SOFT_PURPLE,
+]
+
+
+# =============================================================
+#  Resource pockets
+# =============================================================
+# Four times the land is only better if there is a reason to walk
+# across it. Scatter spread evenly over a map this size just means
+# a longer walk to the same handful of things.
+#
+# So the materials are not spread evenly. Each pocket below is a
+# place that is generous with ONE thing and stingy with the rest,
+# sitting on an axis between two homesteads. Need stone? You go
+# north. That is the difference between a big map and a map worth
+# crossing.
+#
+# `weights` are toadstool / stone / branch. Edit freely — this is
+# the whole design, and it is five lines of data.
+# How far away scenery stops being drawn. Trees are big and read as
+# landmarks, so they survive to the far side of the map; ankle-height
+# clutter does not need to. See _fade for why these and fog_density
+# are one setting in two places.
+const TREE_FADE := 72.0
+const CLUTTER_FADE := 44.0
+const COPSE_COUNT := 16
+
+
+const POCKETS := [
+	{"name": "Stonefall",   "pos": Vector2(0.0, -46.0), "radius": 12.0,
+	 "count": 46, "weights": Vector3(0.08, 0.78, 0.14)},
+	{"name": "Long Grove",  "pos": Vector2(46.0, 0.0),  "radius": 12.0,
+	 "count": 46, "weights": Vector3(0.16, 0.10, 0.74)},
+	{"name": "Toadfen",     "pos": Vector2(0.0, 46.0),  "radius": 12.0,
+	 "count": 46, "weights": Vector3(0.76, 0.12, 0.12)},
+	{"name": "Old Quarry",  "pos": Vector2(-46.0, 0.0), "radius": 12.0,
+	 "count": 46, "weights": Vector3(0.10, 0.55, 0.35)},
+]
+
+
+# =============================================================
 #  Forest edge & scatter
 # =============================================================
 func _build_forest_edge() -> void:
-	var count := 120
+	# A ring, so the count scales with circumference, not area — the
+	# forest is a border, and a border twice as far out needs twice
+	# as many trees, not four times.
+	var count := int(120.0 * Terrain.HALF_SIZE / 34.0)
 	for i in count:
 		var a := _rng.randf_range(0.0, TAU)
-		var r := _rng.randf_range(Terrain.HALF_SIZE - 12.0, Terrain.HALF_SIZE - 1.0)
+		var r := _rng.randf_range(Terrain.HALF_SIZE - 13.0, Terrain.HALF_SIZE - 1.0)
 		var x := cos(a) * r
 		var z := sin(a) * r
+		# The ring passes right through the outer edge of the
+		# homesteads. A tree in the middle of the clearing you were
+		# given is not charming, it is in the way.
+		if _in_pocket_or_homestead(x, z):
+			continue
 		# Trees DO block the camera — but only because player.gd now
 		# enforces a minimum arm length. Without that floor these same
 		# blockers collapsed the lens onto the back of the Sprite's
@@ -357,19 +509,43 @@ func _build_forest_edge() -> void:
 		var t := Props.tree(tree_scale, _rng.randf())
 		_blocker(t, 1.5 * tree_scale, 6.5 * tree_scale)   # canopy: camera only
 		_solid(t, 0.55 * tree_scale, 3.6 * tree_scale)    # trunk: the Sprite
+		_fade(t, TREE_FADE)
 		_place(t, x, z, _rng.randf_range(0, 360))
 
 	# A denser wall to the north, per the zone map
-	for i in 34:
-		var x := _rng.randf_range(-24.0, 24.0)
-		var z := _rng.randf_range(-26.0, -18.0)
+	for i in int(34.0 * Terrain.HALF_SIZE / 34.0):
+		var x := _rng.randf_range(-Terrain.HALF_SIZE * 0.7, Terrain.HALF_SIZE * 0.7)
+		var z := _rng.randf_range(-Terrain.HALF_SIZE * 0.76, -Terrain.HALF_SIZE * 0.53)
 		if Vector2(x, z).length() < 15.0:
+			continue
+		if _in_pocket_or_homestead(x, z):
 			continue
 		var s_wall := _rng.randf_range(0.85, 1.3)
 		var t_wall := Props.tree(s_wall, _rng.randf())
 		_blocker(t_wall, 1.5 * s_wall, 6.5 * s_wall)
 		_solid(t_wall, 0.55 * s_wall, 3.6 * s_wall)
+		_fade(t_wall, TREE_FADE)
 		_place(t_wall, x, z, _rng.randf_range(0, 360))
+
+	# Loose copses out in the open ground, so crossing the map is not
+	# a featureless field with a wall of trees at the far end. These
+	# are also what give the Long Grove its name.
+	for i in COPSE_COUNT:
+		var a := _rng.randf_range(0.0, TAU)
+		var r := _rng.randf_range(18.0, Terrain.HALF_SIZE - 16.0)
+		var cx := cos(a) * r
+		var cz := sin(a) * r
+		if _in_pocket_or_homestead(cx, cz):
+			continue
+		for _j in _rng.randi_range(2, 5):
+			var tx := cx + _rng.randf_range(-4.0, 4.0)
+			var tz := cz + _rng.randf_range(-4.0, 4.0)
+			var sc := _rng.randf_range(0.7, 1.2)
+			var ct := Props.tree(sc, _rng.randf())
+			_blocker(ct, 1.5 * sc, 6.5 * sc)
+			_solid(ct, 0.55 * sc, 3.6 * sc)
+			_fade(ct, TREE_FADE)
+			_place(ct, tx, tz, _rng.randf_range(0, 360))
 
 
 func _build_scatter() -> void:
@@ -381,11 +557,17 @@ func _build_scatter() -> void:
 	# bush. This counter only advances when a pickup is actually made.
 	var gid := 0
 
-	for i in 240:
+	# Scales with area, because this is a field, not a border. The
+	# density stays what it always was; there is simply more field.
+	var scatter_n := int(240.0 * pow(Terrain.HALF_SIZE / 34.0, 2.0))
+	for i in scatter_n:
 		var x := _rng.randf_range(-Terrain.HALF_SIZE + 4.0, Terrain.HALF_SIZE - 4.0)
 		var z := _rng.randf_range(-Terrain.HALF_SIZE + 4.0, Terrain.HALF_SIZE - 4.0)
 		var d := Vector2(x, z).length()
-		if d > Terrain.HALF_SIZE - 10.0:
+		if d > Terrain.HALF_SIZE - Terrain.RIM_BAND + 4.0:
+			continue
+		# A homestead clearing is the player's to fill, not mine.
+		if Terrain.homestead_at(x, z) >= 0:
 			continue
 		# Keep the farm and the village circle clear.
 		if absf(x - Terrain.FARM_CENTRE.x) < Terrain.FARM_HALF.x + 2.0 \
@@ -396,33 +578,111 @@ func _build_scatter() -> void:
 
 		var roll := _rng.randf()
 		if roll < 0.30:
-			_place(Props.flower_cluster(flower_colors[_rng.randi() % flower_colors.size()]),
-				x, z, _rng.randf_range(0, 360))
+			var fl := Props.flower_cluster(flower_colors[_rng.randi() % flower_colors.size()])
+			_fade(fl, CLUTTER_FADE)
+			_place(fl, x, z, _rng.randf_range(0, 360))
 		elif roll < 0.52:
-			_gatherable(Props.tiny_mushroom(Vector3.ZERO, _rng.randf_range(0.9, 1.8), gid),
-				gid, "toadstool", x, z, _rng.randf_range(0, 360))
-			gid += 1
+			gid = _drop_material("toadstool", x, z, gid)
 		elif roll < 0.72:
-			_gatherable(Props.rock(_rng.randf_range(0.4, 0.9),
-				Palette.STONE.lerp(Palette.MOSS_DARK, _rng.randf() * 0.4)),
-				gid, "stone", x, z, _rng.randf_range(0, 360))
-			gid += 1
+			gid = _drop_material("stone", x, z, gid)
 		elif roll < 0.88:
-			_gatherable(Props.branch(gid), gid, "branch", x, z, _rng.randf_range(0, 360))
-			gid += 1
+			gid = _drop_material("branch", x, z, gid)
 		else:
 			var tuft := ClayKit.blob(Vector3(_rng.randf_range(0.5, 1.0), 0.24,
 				_rng.randf_range(0.4, 0.8)), Palette.MOSS_DARK, Vector3.ZERO,
 				{"segments": 8, "grain": 0.22})
+			_fade(tuft, CLUTTER_FADE)
 			_place(tuft, x, z, _rng.randf_range(0, 360), 0.04)
 
 	# Branches cluster under the trees, which is where you would look.
-	for i in 34:
+	for i in int(34.0 * Terrain.HALF_SIZE / 34.0):
 		var a := _rng.randf_range(0.0, TAU)
-		var r := _rng.randf_range(Terrain.HALF_SIZE - 15.0, Terrain.HALF_SIZE - 11.0)
-		_gatherable(Props.branch(gid), gid, "branch",
-			cos(a) * r, sin(a) * r, _rng.randf_range(0, 360))
-		gid += 1
+		var r := _rng.randf_range(Terrain.HALF_SIZE - 16.0, Terrain.HALF_SIZE - 12.0)
+		gid = _drop_material("branch", cos(a) * r, sin(a) * r, gid)
+
+	# And the pockets, which is the whole reason the map is worth
+	# walking across. See the comment on POCKETS.
+	for pk in POCKETS:
+		gid = _build_pocket(pk, gid)
+
+
+## One material pickup, sculpted to match what it is. The three
+## kinds all go through here so the scatter and the pockets cannot
+## drift apart — add a fourth material and both get it at once.
+func _drop_material(kind: String, x: float, z: float, gid: int) -> int:
+	var node: Node3D
+	match kind:
+		"toadstool":
+			node = Props.tiny_mushroom(Vector3.ZERO, _rng.randf_range(0.9, 1.8), gid)
+		"stone":
+			node = Props.rock(_rng.randf_range(0.4, 0.9),
+				Palette.STONE.lerp(Palette.MOSS_DARK, _rng.randf() * 0.4))
+		_:
+			node = Props.branch(gid)
+	_fade(node, CLUTTER_FADE)
+	_gatherable(node, gid, kind, x, z, _rng.randf_range(0, 360))
+	return gid + 1
+
+
+## A place that is generous with one thing. Scatters `count` pickups
+## in a disc, drawn from the pocket's weights, plus a few boulders or
+## trees so it looks like somewhere before you know what it gives.
+func _build_pocket(pk: Dictionary, gid: int) -> int:
+	var c: Vector2 = pk["pos"]
+	var radius: float = float(pk["radius"])
+	var w: Vector3 = pk["weights"]
+	var total: float = w.x + w.y + w.z
+	for i in int(pk["count"]):
+		# sqrt keeps the disc evenly covered instead of piling
+		# everything into the middle.
+		var a := _rng.randf_range(0.0, TAU)
+		var r := sqrt(_rng.randf()) * radius
+		var x := c.x + cos(a) * r
+		var z := c.y + sin(a) * r
+		if Vector2(x, z).length() > Terrain.HALF_SIZE - Terrain.RIM_BAND + 2.0:
+			continue
+		var roll := _rng.randf() * total
+		var kind := "toadstool"
+		if roll > w.x:
+			kind = "stone"
+		if roll > w.x + w.y:
+			kind = "branch"
+		gid = _drop_material(kind, x, z, gid)
+
+	# Landmark geometry, so you can see the pocket from a distance
+	# and go "what's over there" rather than stumbling into it.
+	var stony: bool = w.y >= 0.5
+	for i in 7:
+		var a := _rng.randf_range(0.0, TAU)
+		var r := sqrt(_rng.randf()) * radius * 0.9
+		var x := c.x + cos(a) * r
+		var z := c.y + sin(a) * r
+		if stony:
+			var boulder := Props.rock(_rng.randf_range(1.4, 2.6),
+				Palette.STONE.lerp(Palette.EARTH_DARK, _rng.randf() * 0.35))
+			_solid(boulder, 1.0, 1.6)
+			_fade(boulder, TREE_FADE)
+			_place(boulder, x, z, _rng.randf_range(0, 360))
+		else:
+			var sc := _rng.randf_range(1.0, 1.5)
+			var t := Props.tree(sc, _rng.randf())
+			_blocker(t, 1.5 * sc, 6.5 * sc)
+			_solid(t, 0.55 * sc, 3.6 * sc)
+			_fade(t, TREE_FADE)
+			_place(t, x, z, _rng.randf_range(0, 360))
+	return gid
+
+
+## Somewhere the generic scatter and the tree walls should keep out
+## of, because something deliberate is already there.
+func _in_pocket_or_homestead(x: float, z: float) -> bool:
+	if Terrain.homestead_at(x, z) >= 0:
+		return true
+	for pk in POCKETS:
+		var c: Vector2 = pk["pos"]
+		if Vector2(x - c.x, z - c.y).length() < float(pk["radius"]) + 3.0:
+			return true
+	return false
 
 
 ## A pickup: registered as an interactable, hidden if the save says it
@@ -591,6 +851,31 @@ func _place(node: Node3D, x: float, z: float, yaw_deg: float, y_offset: float = 
 	node.position = Terrain.point(x, z) + Vector3(0, y_offset, 0)
 	node.rotation_degrees.y = yaw_deg
 	add_child(node)
+
+
+## Stop drawing this prop past `dist` metres.
+##
+## This is the whole reason the map could get four times bigger
+## without the frame rate falling over. Every prop here is a little
+## cluster of separate mesh instances — a tree is a trunk plus five
+## leaf blobs — and each one is a draw call whether it fills the
+## screen or is a speck on the far hill. Quadrupling the land while
+## drawing all of it would have quadrupled that bill.
+##
+## Hard cutoff, no fade: fading an object out needs transparency,
+## and the clay shader is deliberately opaque (a shader that writes
+## ALPHA turns ALL of its geometry see-through). Fog is what hides
+## the cutoff instead, which is why fog_density and these distances
+## have to be tuned together. If you see things blinking into
+## existence, either raise the fog or raise the distance.
+func _fade(node: Node3D, dist: float) -> void:
+	var stack: Array[Node] = [node]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is GeometryInstance3D:
+			(n as GeometryInstance3D).visibility_range_end = dist
+		for c in n.get_children():
+			stack.append(c)
 
 
 func _register(pos: Vector3, kind: String, index: int, label: String, radius: float) -> void:

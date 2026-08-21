@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # =============================================================
-# selftest.sh — press every button in the game, check the result.
+# bench.sh — how heavy is the world? Node counts + frame time.
 # -------------------------------------------------------------
-#   ./tools/selftest.sh
+#   ./tools/bench.sh
 #
-# Runs headless in a few seconds. Exits non-zero if anything
-# failed, so you can run it before you trust a change.
-# The screenshot loop can see how the game looks; this sees
-# whether it still works.
+# Prints how many nodes, meshes and colliders the world builds,
+# and the average frame time over four seconds. Run it before
+# and after any change that adds a lot of scenery — the world
+# getting bigger is easy to ship and hard to un-ship.
+#
+# Numbers here are your machine's, not a player's. Compare a
+# before against an after on the SAME machine; the absolute
+# figure means very little on its own.
 # =============================================================
 set -uo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
 find_godot() {
   if command -v godot >/dev/null 2>&1; then command -v godot; return; fi
 
@@ -37,21 +40,7 @@ find_godot() {
   return 1
 }
 GODOT="${GODOT:-$(find_godot || true)}"
-[ -z "$GODOT" ] && { echo "Could not find Godot. See tools/shots.sh for how to point at it." >&2; exit 1; }
+[ -z "$GODOT" ] && { echo "Could not find Godot. See tools/shots.sh." >&2; exit 1; }
 
-LOG="$(mktemp)"
-"$GODOT" --path "$PROJECT_DIR" --headless -- --selftest 2>&1 | tee "$LOG"
-RC=${PIPESTATUS[0]}
-
-# A GDScript runtime error prints and then execution CARRIES ON, so
-# assertions can all pass while the game is throwing on every action.
-# That is exactly how a Godot 3 audio call survived into a shipped
-# build. Any SCRIPT ERROR fails the run, full stop.
-ERRS=$(grep -c "SCRIPT ERROR" "$LOG" || true)
-rm -f "$LOG"
-if [ "$ERRS" -gt 0 ]; then
-  echo
-  echo "FAILED: $ERRS script error(s) above. Assertions passing is not enough." >&2
-  exit 1
-fi
-exit "$RC"
+"$GODOT" --path "$PROJECT_DIR" --rendering-driver opengl3 --resolution 640x360 -- --bench 2>&1 \
+  | grep -E "^\[bench\]|SCRIPT ERROR|ERROR" 

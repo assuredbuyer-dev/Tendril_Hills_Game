@@ -46,6 +46,21 @@ Above 70 the Sprite walks a little faster and sometimes pulls up two
 crops instead of one; below 20 it trudges. That's the whole system —
 this is a cozy game and nobody gets punished for wandering off.
 
+**The map, and your corner of it.** The village in the middle is
+shared — Old Sprout, Pip's stall, the workbench, the quest board and
+the Root Portal. Walk out to any corner and you find a clearing with a
+name on a signpost: Bramblewick, Honeyhollow, Thistledown, Mosswood.
+Each is flat, ringed with stones, has its own patch of soil, and is
+otherwise empty on purpose — it is somewhere to build, not somewhere
+to look at. Between them, on the compass points, are four places thick
+with one material each: **Stonefall** north, the **Long Grove** east,
+**Toadfen** south, the **Old Quarry** west. Needing stone is a
+direction, not a search.
+
+All of it is two lists — `Terrain.HOMESTEADS` and `World.POCKETS`. Add
+a row to either and a whole new place appears, terrain and signpost and
+soil included.
+
 **Two economies, two jobs.** Coins come from farming and buy seeds.
 Materials come from walking around — toadstools, stones and fallen
 branches you pick up with **E** — and build things at the workbench.
@@ -86,6 +101,8 @@ TendrilHills3D/
 │   └── terrain.gd         "How high is the ground at (x, z)?" The
 │                          terrain mesh and everything standing on it
 │                          ask this same function, so nothing floats.
+│                          Also HALF_SIZE (how big the world is) and
+│                          HOMESTEADS (whose clearing is where).
 │
 ├── art/                   ── how it looks ──
 │   ├── clay.gdshader      The clay look. Three tricks: vertex wobble,
@@ -224,6 +241,25 @@ failed one. That loop is how the current look got made — the first pass
 was fogged into milk, the soil looked like bread, and the HUD had
 exploded across the screen.
 
+## 7b. Checking it still runs fast
+
+```bash
+./tools/bench.sh
+```
+
+Prints how many meshes the world builds, how many draw calls a frame
+actually costs, and the frame time. Run it before and after anything
+that adds scenery, and compare the two on the same machine — the
+absolute number means very little, the ratio means everything.
+
+Draw calls are the figure that matters. The `gl_compatibility`
+renderer runs out of those before it runs out of anything else, and
+unlike frame time it is a property of the scene rather than of your
+laptop. Quadrupling the map cost 10% more draw calls; `docs/DECISIONS.md`
+has how.
+
+---
+
 ## 8. Known limits of this slice (all deliberate)
 
 - Grow times are shortened for playtesting (carrot 45s, radish 25s,
@@ -238,3 +274,7 @@ exploded across the screen.
 - The font is Godot's default. A rounded friendly face (Art Bible §6)
   is a one-line theme change once you pick one.
 - No touch controls yet — this build targets Mac and browser.
+- **Single player.** The four homesteads are laid out for four
+  players and the shared/private split is already drawn on the map,
+  but nobody can join yet. Same-house co-op over the local network is
+  the next build.

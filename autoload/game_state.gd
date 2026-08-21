@@ -43,6 +43,11 @@ enum Belly { PECKISH, FINE, WELL_FED }
 const PLOT_COLS := 5
 const PLOT_ROWS := 4
 const PLOT_SPACING := 2.6
+# Each homestead gets a smaller patch than the shared farm. The
+# big field to the east is where you learn; your own plot is
+# where you commit.
+const HOMESTEAD_COLS := 3
+const HOMESTEAD_ROWS := 3
 
 # --- Live state ----------------------------------------------
 var coins: int = Defs.STARTING_COINS
@@ -108,11 +113,21 @@ func _blank_plot(x: float, z: float) -> Dictionary:
 
 func _build_plot_layout() -> void:
 	plots.clear()
-	var origin := Terrain.FARM_CENTRE
-	var w: float = (PLOT_COLS - 1) * PLOT_SPACING * 0.5
-	var d: float = (PLOT_ROWS - 1) * PLOT_SPACING * 0.5
-	for r in PLOT_ROWS:
-		for c in PLOT_COLS:
+	# The shared farm to the east comes FIRST and keeps indices
+	# 0..19 forever. Saves store plots by index, so anything added
+	# later has to be added at the end or every existing save
+	# wakes up with its carrots in the wrong field.
+	_add_plot_grid(Terrain.FARM_CENTRE, PLOT_COLS, PLOT_ROWS)
+	# Then one small grid per homestead, in HOMESTEADS order.
+	for hs in Terrain.HOMESTEADS:
+		_add_plot_grid(hs["farm"], HOMESTEAD_COLS, HOMESTEAD_ROWS)
+
+
+func _add_plot_grid(origin: Vector3, cols: int, rows: int) -> void:
+	var w: float = (cols - 1) * PLOT_SPACING * 0.5
+	var d: float = (rows - 1) * PLOT_SPACING * 0.5
+	for r in rows:
+		for c in cols:
 			var x: float = origin.x - w + c * PLOT_SPACING
 			var z: float = origin.z - d + r * PLOT_SPACING
 			plots.append(_blank_plot(x, z))

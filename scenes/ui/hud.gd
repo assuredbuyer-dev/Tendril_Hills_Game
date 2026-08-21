@@ -650,6 +650,11 @@ func _build_help() -> void:
 		"Pip's stall: buy seeds, sell your basket.",
 		"Workbench: turn gathered bits into things to build.",
 		"Crops keep growing while the game is closed.",
+		"",
+		"Walk out to a corner of the map and you will find a clearing",
+		"with a name on a signpost. That one is yours — it has its own",
+		"soil and room to build. North, south, east and west there are",
+		"places thick with stone, branches or toadstools.",
 		"H — hide this card      F9 — start over",
 	]
 	for line in lines:

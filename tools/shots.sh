@@ -21,10 +21,24 @@ OUT_DIR="$PROJECT_DIR/.shots"
 # --- Find the Godot binary -----------------------------------
 find_godot() {
   if command -v godot >/dev/null 2>&1; then command -v godot; return; fi
-  for app in \
-    "/Applications/Godot.app/Contents/MacOS/Godot" \
-    "$HOME/Applications/Godot.app/Contents/MacOS/Godot" \
-    "/Applications/Godot_mono.app/Contents/MacOS/Godot"; do
+
+  local candidates=(
+    "/Applications/Godot.app/Contents/MacOS/Godot"
+    "$HOME/Applications/Godot.app/Contents/MacOS/Godot"
+    "/Applications/Godot_mono.app/Contents/MacOS/Godot"
+  )
+  # Also walk up from the project. Plenty of people keep Godot.app next
+  # to their game folders instead of in /Applications, and a script that
+  # only checks /Applications tells them Godot is missing when it is
+  # sitting two directories up.
+  local d="$PROJECT_DIR"
+  for _ in 1 2 3 4; do
+    d="$(dirname "$d")"
+    [ "$d" = "/" ] && break
+    candidates+=("$d/Godot.app/Contents/MacOS/Godot")
+  done
+
+  for app in "${candidates[@]}"; do
     [ -x "$app" ] && { echo "$app"; return; }
   done
   return 1

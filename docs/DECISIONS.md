@@ -328,3 +328,91 @@ both keep working while the game is closed.
    ~68 metres across. Tendril Valley could be a second area in the
    same scene rather than a separate load — cheaper, and the portal
    walk-through would be seamless.
+
+---
+
+## Four times the land, with somewhere to go in it
+
+*Added 21 Aug 2026, when the kids asked for the open land to be
+three or four times bigger.*
+
+`Terrain.HALF_SIZE` went from 34 to 68 — twice as wide, so four
+times the area. The straightforward version of that request is a
+bigger square with four times as much scenery in it, and it is
+worse than what it replaces: the same walk, longer. A map is not
+made bigger by adding metres, it is made bigger by adding
+destinations.
+
+So the new land is not filler. It has:
+
+- **Four homestead clearings**, on the diagonals, one per player.
+  Flat, buildable, ringed with stones, named on a signpost, each
+  with its own patch of soil. The village in the middle stays
+  shared — Old Sprout, the stall, the workbench, the quest board
+  and the portal belong to everyone.
+- **Four resource pockets**, on the axes between the homesteads.
+  Each is generous with one material and stingy with the rest, so
+  "I need stone" has an answer that is a direction.
+
+They alternate, so walking the ring goes clearing, pocket,
+clearing, pocket. That is the whole layout, and it lives in two
+lists: `Terrain.HOMESTEADS` and `World.POCKETS`. Add a fifth
+homestead and a fifth clearing appears, terrain flattening and
+soil grid and signpost and all, with no other edit.
+
+**The homesteads are also the multiplayer layout**, decided
+before the networking exists so the networking does not have to
+argue with the map later.
+
+### What the size actually cost
+
+Measured, not guessed — `./tools/bench.sh` was written for this
+change and is worth running before and after anything that adds
+scenery:
+
+| | old map | new map |
+|---|---|---|
+| land | 4,624 m² | 18,496 m² |
+| mesh instances built | 2,968 | 5,727 |
+| **draw calls per frame** | **1,927** | **2,111** |
+
+Four times the land for 10% more work per frame. Three things
+did that:
+
+1. **Distance culling** (`World._fade`). Scenery stops being
+   drawn past a set range — 72 m for trees, 44 m for ankle-height
+   clutter. Hard cutoff, no fade, because fading needs
+   transparency and the clay shader is deliberately opaque. Fog
+   hides the cutoff, which means `fog_density` and those two
+   distances are really one setting written in three places.
+2. **The shadow distance came down**, 70 m → 58 m. Every object
+   inside that radius is drawn a second time into the shadow map,
+   which makes it the most expensive single number in
+   `_build_environment`. By 58 m the fog has taken most of the
+   contrast out of a shadow anyway.
+3. **The forest ring scales with circumference, not area.** It is
+   a border. A border twice as far out needs twice as many trees,
+   not four times as many. Only the open-field scatter scales
+   with area, because that is the one that is actually a field.
+
+### Terrain resolution is a resolution, not a size
+
+`World.TERRAIN_RES` went 84 → 168 alongside `HALF_SIZE`. It has
+to move with the map or the ground goes visibly blocky; at 168
+across 136 m the quads are ~0.8 m, the same as they always were.
+
+### Plot indices are append-only
+
+`GameState.plots` is a flat array and saves store plots **by
+index**. The shared farm keeps indices 0..19 forever and the
+homestead grids are appended after it. Insert a plot anywhere
+earlier and every existing save wakes up with its crops in
+somebody else's field. `_test_homesteads` in the self-test guards
+this.
+
+### What did NOT change
+
+The village, the farm, the portal, spawn, and the whole first
+half-hour of the game are exactly where they were. A kid who has
+been playing this all week walks out of the meadow into the same
+scene. Everything new is somewhere they have not been yet.

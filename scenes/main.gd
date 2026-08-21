@@ -47,6 +47,13 @@ func _ready() -> void:
 		st.run()
 		return
 
+	# Dev benchmark (see scenes/dev/bench.gd). Off unless asked.
+	if "--bench" in OS.get_cmdline_user_args():
+		var bn: Node = load("res://scenes/dev/bench.gd").new()
+		add_child(bn)
+		bn.setup(self)
+		return
+
 	# Dev screenshot harness (see scenes/dev/capture.gd). Off unless asked.
 	if "--shots" in OS.get_cmdline_user_args():
 		var cap: Node = load("res://scenes/dev/capture.gd").new()

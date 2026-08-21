@@ -41,6 +41,8 @@ func run() -> void:
 	_test_placing()
 	_test_scarecrow_and_hive()
 	_test_registry()
+	_test_world_size()
+	_test_homesteads()
 	await _test_jump()
 	_test_collision()
 	_test_save_roundtrip()
@@ -312,6 +314,128 @@ func _test_registry() -> void:
 # points? This is the real question "can the Sprite walk through it?"
 # reduced to one ray, and it is the only way to check collision without
 # a human at the keyboard.
+# The map got four times bigger once. Everything that quietly
+# assumed 34 metres broke, and most of it broke somewhere you only
+# see by walking there. These checks are the tripwires for the next
+# time someone changes Terrain.HALF_SIZE.
+func _test_world_size() -> void:
+	print("\n-- world size --")
+	var h := Terrain.HALF_SIZE
+
+	# The playable disc has to be well inside the bowl rim, or the
+	# rim swallows the map.
+	check(Terrain.RIM_BAND < h * 0.4,
+		"the bowl rim is a border, not most of the world")
+
+	# Spawn, village, farm and portal all have to stay on real,
+	# level ground no matter how the map is resized.
+	for spot in [Terrain.SPAWN_POS, Terrain.VILLAGE_CENTRE,
+			Terrain.FARM_CENTRE, Terrain.PORTAL_POS]:
+		check(Vector2(spot.x, spot.z).length() < h - Terrain.RIM_BAND,
+			"(%.0f, %.0f) is inside the playable area" % [spot.x, spot.z])
+
+	# The ground under the village must be flat enough to build on.
+	check(Terrain.normal(0.0, 0.0).y > 0.99, "the village centre is level")
+	check(Terrain.is_buildable(0.0, 4.0), "you can build in the village")
+	check(not Terrain.is_buildable(h - 2.0, 0.0),
+		"you cannot build out on the rim")
+
+	# Height has to be finite everywhere, including the corners --
+	# a NaN here puts the player under the map with no error.
+	for corner in [Vector2(h, h), Vector2(-h, h), Vector2(h, -h), Vector2(-h, -h)]:
+		var y := Terrain.height(corner.x, corner.y)
+		check(is_finite(y) and absf(y) < 40.0,
+			"the ground at (%.0f, %.0f) is a real height" % [corner.x, corner.y])
+
+
+# One clearing per player. Everything below reads from
+# Terrain.HOMESTEADS, so adding a fifth homestead extends the test
+# rather than needing a new one written.
+func _test_homesteads() -> void:
+	print("\n-- homesteads --")
+	var h := Terrain.HALF_SIZE
+	check(Terrain.HOMESTEADS.size() >= 4,
+		"there is a homestead for each player")
+
+	var shared_plots := GameState.PLOT_COLS * GameState.PLOT_ROWS
+	var per_home := GameState.HOMESTEAD_COLS * GameState.HOMESTEAD_ROWS
+	# Saves store plots by index. If the shared farm ever stops being
+	# indices 0..19, every existing save wakes up with its crops in
+	# somebody else's field.
+	check(GameState.plots.size() == shared_plots
+			+ Terrain.HOMESTEADS.size() * per_home,
+		"every homestead has its own soil, and the shared farm still comes first")
+	for i in shared_plots:
+		var p: Dictionary = GameState.plots[i]
+		check(absf(p["x"] - Terrain.FARM_CENTRE.x) <= Terrain.FARM_HALF.x + 0.1,
+			"shared plot %d is still in the shared farm" % i) if i == 0 else null
+
+	for i in Terrain.HOMESTEADS.size():
+		var hs: Dictionary = Terrain.HOMESTEADS[i]
+		var c: Vector3 = hs["pos"]
+		var name_s := String(hs["name"])
+
+		check(Vector2(c.x, c.z).length() + Terrain.HOMESTEAD_RADIUS < h - Terrain.RIM_BAND + 8.0,
+			"%s is inside the map, not up the rim" % name_s)
+		check(Terrain.normal(c.x, c.z).y > 0.99, "%s is flat" % name_s)
+		# Not "is one arbitrary spot buildable" -- the first version of
+		# this test picked c + 4 metres on X and failed on the two
+		# homesteads whose soil happens to lie that way. What matters
+		# is that a real amount of the clearing is free to build on
+		# once the soil patch has taken its share.
+		var open_spots := 0
+		var sampled := 0
+		for sx in range(-8, 9, 2):
+			for sz in range(-8, 9, 2):
+				if Vector2(sx, sz).length() > Terrain.HOMESTEAD_RADIUS - 1.0:
+					continue
+				sampled += 1
+				if Terrain.is_buildable(c.x + sx, c.z + sz):
+					open_spots += 1
+		check(open_spots > sampled / 2,
+			"most of %s is yours to build on (%d of %d spots)" % [
+				name_s, open_spots, sampled])
+		check(Terrain.homestead_at(c.x, c.z) == i,
+			"%s knows which homestead it is" % name_s)
+
+		# Its soil block, in HOMESTEADS order, after the shared farm.
+		var first := shared_plots + i * per_home
+		var soil_ok := true
+		var f: Vector3 = hs["farm"]
+		for j in range(first, first + per_home):
+			var p: Dictionary = GameState.plots[j]
+			if absf(p["x"] - f.x) > Terrain.HOMESTEAD_FARM_HALF.x + 0.2 \
+			or absf(p["z"] - f.z) > Terrain.HOMESTEAD_FARM_HALF.y + 0.2:
+				soil_ok = false
+		check(soil_ok, "%s's soil is at %s's farm" % [name_s, name_s])
+		check(not Terrain.is_buildable(f.x, f.z),
+			"%s's soil is kept for farming, not building" % name_s)
+
+		# And you can actually farm it -- the whole point.
+		var plot_i := first
+		GameState.interact_plot(plot_i)          # till
+		check(GameState.plots[plot_i]["state"] == GameState.Soil.TILLED,
+			"you can turn over soil at %s" % name_s)
+		GameState.seeds["carrot"] = int(GameState.seeds.get("carrot", 0)) + 1
+		GameState.selected_seed = "carrot"
+		GameState.interact_plot(plot_i)          # plant
+		check(GameState.plots[plot_i]["state"] == GameState.Soil.PLANTED,
+			"you can plant at %s" % name_s)
+		GameState.interact_plot(plot_i)          # water
+		check(GameState.plots[plot_i]["state"] == GameState.Soil.GROWING,
+			"you can water at %s" % name_s)
+
+	# Two homesteads sharing a spot would look like one clearing with
+	# two signs in it.
+	for i in Terrain.HOMESTEADS.size():
+		for j in range(i + 1, Terrain.HOMESTEADS.size()):
+			var a: Vector3 = Terrain.HOMESTEADS[i]["pos"]
+			var b: Vector3 = Terrain.HOMESTEADS[j]["pos"]
+			check(Vector2(a.x - b.x, a.z - b.z).length() > Terrain.HOMESTEAD_RADIUS * 2.5,
+				"%s and %s are separate places" % [
+					Terrain.HOMESTEADS[i]["name"], Terrain.HOMESTEADS[j]["name"]])
+
+
 func _blocked(from: Vector3, to: Vector3) -> bool:
 	var space := get_viewport().world_3d.direct_space_state
 	var q := PhysicsRayQueryParameters3D.create(from, to)
