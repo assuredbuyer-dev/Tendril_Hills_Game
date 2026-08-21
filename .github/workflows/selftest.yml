@@ -3,8 +3,8 @@
 # -------------------------------------------------------------
 # WHY: several people are committing to this repo now. Without this,
 # a broken recipe or a typo'd function name reaches everyone else's
-# next pull and costs them an evening. This catches it in about two
-# minutes and puts a red X on the commit that did it.
+# next pull and costs them an evening. This catches it in about
+# half a minute and puts a red X on the commit that did it.
 #
 # The version below must match the Godot everyone is actually running.
 # One line to change when you all upgrade.
@@ -23,11 +23,16 @@ jobs:
       GODOT_VERSION: 4.7.1-stable
 
     steps:
-      - uses: actions/checkout@v4
+      # v5 of both actions, not v4. v4 runs on Node 20, which GitHub
+      # has deprecated -- it still works, but it warns on every run
+      # and will become a hard failure whenever they finish removing
+      # it. Bumping now is a two-character change; bumping after it
+      # breaks means the kids see a red X they did not cause.
+      - uses: actions/checkout@v5
 
       - name: Cache the Godot download
         id: godot-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/godot
           key: godot-${{ env.GODOT_VERSION }}
