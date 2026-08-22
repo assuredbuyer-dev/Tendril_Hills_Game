@@ -113,11 +113,16 @@ Value: Tendril Hills uses your local network so you can play
        together with people in this house.
 ```
 
-If Godot's export dialog offers a local-network privacy field, set it
-there instead so it survives a re-export. Otherwise you'll be
-re-adding it in Xcode each time — the docs explain how to link the
-Godot folder directly into Xcode so you don't have to re-export at
-all.
+**This is now automatic** — `addons/ios_plist` adds the key on every
+iOS export, because Godot 4.7's exporter has privacy fields for
+camera, microphone and photo library but none for local network, and
+adding it by hand after every export is one forgotten step away from
+a silent failure.
+
+You should see `[ios_plist] added NSLocalNetworkUsageDescription` in
+Godot's output panel when you export. If you don't, the plugin isn't
+enabled: Project → Project Settings → Plugins → tick **iOS Info.plist
+extras**, and check the key by hand in Xcode for that build.
 
 The first time he taps *Go*, iOS asks permission. He must say yes. If
 he says no by accident: Settings → Tendril Hills → Local Network.
