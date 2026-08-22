@@ -7,7 +7,13 @@ carrot, water it, wait, pull it up, eat it, sell the rest, and build a
 mushroom house. The Root Portal sits dormant in the west, counting
 your quests.
 
-**There is not one image file in this project.** Every mushroom,
+**There is one image file in this project, and the game drew it.**
+`icon_1024.png` exists because Apple will not ship an app without an
+icon file. It is rendered by `./tools/icon.sh` from the same two mesh
+generators as everything else, so it follows the palette instead of
+drifting away from it. Otherwise:
+
+**There is not one hand-made image file in this project.** Every mushroom,
 carrot, tree and eyeball is sculpted at runtime from two mesh
 generators and one shader. That is deliberate — it means the game is
 fully playable *today*, it lives in Git as readable text, and each
@@ -99,6 +105,7 @@ find that without being told; a menu of tools is a wall.
 
 ```
 TendrilHills3D/
+├── icon_1024.png          The app icon. Generated — ./tools/icon.sh.
 ├── project.godot          Config. Registers autoloads, sets the
 │                          gl_compatibility renderer (the one that
 │                          works on Mac AND in a browser).

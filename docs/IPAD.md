@@ -5,6 +5,10 @@ afternoon the first time and about two minutes for every build after.
 
 ---
 
+> You've shipped to Apple before, so this skips the App Store Connect
+> basics and covers the parts that are specific to **Godot** and to
+> **this project**. The Godot-side gotchas are section 3 onward.
+
 ## 1. The account question, settled
 
 **Your son does not need a developer account.** Your paid membership
@@ -36,17 +40,49 @@ unprompted. You have the paid account — use it.
 
 ## 2. One-off setup on your Mac
 
-1. **Install Xcode** from the App Store. It's large (~10GB) and slow.
-   Open it once and let it finish installing components.
-2. **Export templates.** In Godot: *Editor → Manage Export
-   Templates → Download and Install*. This is a separate ~1GB
-   download from Godot itself and is easy to forget.
-3. **Sign in.** Xcode → Settings → Accounts → add your Apple ID, the
-   one with the paid membership.
+1. **Xcode**, if it isn't already there. Open it once so it finishes
+   installing components.
+2. **Godot's iOS export templates** — *Editor → Manage Export
+   Templates → Download and Install*. This is the step people miss:
+   it's a separate ~1GB download from Godot itself, it is **not**
+   included with the editor, and without it the iOS preset shows a
+   red "export templates not found" and nothing else explains why.
+   The version must match your Godot exactly — 4.7.1 templates for a
+   4.7.1 editor.
+3. **Xcode → Settings → Accounts** → your paid Apple ID.
 
 ---
 
-## 3. Exporting
+## 3. What's already done for you
+
+Three things that would otherwise bite, already in the repo:
+
+**The app icon.** `icon_1024.png` in the project root — 1024×1024,
+RGB with no alpha, which is what Apple requires. Point the iOS
+preset's App Store icon field at it and Godot generates every other
+size.
+
+It is the **only image file in this project**, and it is generated
+rather than drawn: `./tools/icon.sh` renders it from the same mesh
+generators and the same shader as the game. Change `data/palette.gd`,
+re-run it, and the icon follows the game instead of drifting away
+from it.
+
+**Landscape is locked.** `display/window/handheld/orientation` is set
+to `sensor_landscape` in `project.godot`. The camera rig and HUD are
+both built wide and the game is genuinely unplayable in portrait;
+this lets him hold the iPad either way up but never turns it
+sideways.
+
+**The mobile renderer is already right.**
+`renderer/rendering_method.mobile="gl_compatibility"` — the same
+choice that makes the browser build work. Don't switch this to
+Forward+ for iOS; the whole art style is built to not need what
+Forward+ adds.
+
+---
+
+## 4. Exporting
 
 In Godot: *Project → Export → Add… → iOS*, then fill in:
 
@@ -88,7 +124,7 @@ he says no by accident: Settings → Tendril Hills → Local Network.
 
 ---
 
-## 4. How he actually joins
+## 5. How he actually joins
 
 **The host list does not work on iPad, and cannot be made to.**
 
@@ -114,7 +150,7 @@ same place.
 
 ---
 
-## 5. Touch controls
+## 6. Touch controls
 
 They appear automatically on a touch device and never on a MacBook.
 Left thumb walks, **E** does the obvious thing, **Jump** jumps,
@@ -131,7 +167,33 @@ or run the game with `-- --touch`.
 
 ---
 
-## 6. When something goes wrong
+---
+
+## 7. TestFlight, when you want it
+
+Worth doing the cable route first — it fails loudly and locally, and
+you want to know the game runs before you involve Apple's servers.
+
+Once it does, TestFlight is the same archive with a different
+destination, and the only Godot-specific notes are:
+
+- **Bump `application/version` and `application/short_version` in the
+  iOS export preset** before each upload. App Store Connect rejects a
+  duplicate build number, and Godot does not increment it for you —
+  this is the single most common way a Godot TestFlight upload fails
+  after the first one.
+- **Export as Release, not Debug.** A debug export embeds the remote
+  debugger and will be rejected.
+- **Strip the dev scenes.** Set the iOS preset's exclude filter to
+  `scenes/dev/*`, the same as the macOS preset already does. The
+  self-test, the screenshot harness and the icon maker have no
+  business in a shipped build.
+
+Everything after that is the App Store Connect flow you already know.
+
+---
+
+## 8. When something goes wrong
 
 **The iPad joins and immediately drops.** Almost always the local
 network permission. Settings → Tendril Hills → Local Network.

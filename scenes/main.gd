@@ -25,7 +25,8 @@ func _is_dev_run() -> bool:
 	for a in args:
 		if a.begins_with("--nettest="):
 			return true
-	return "--selftest" in args or "--shots" in args or "--bench" in args
+	return "--selftest" in args or "--shots" in args or "--bench" in args \
+		or "--icon" in args
 
 
 func _ready() -> void:
@@ -81,6 +82,16 @@ func _ready() -> void:
 		var st: Node = load("res://scenes/dev/selftest.gd").new()
 		add_child(st)
 		st.run()
+		return
+
+	# App icon renderer (see scenes/dev/icon_maker.gd).
+	if "--icon" in OS.get_cmdline_user_args():
+		world.queue_free()
+		player.queue_free()
+		hud.queue_free()
+		var ic: Node = load("res://scenes/dev/icon_maker.gd").new()
+		add_child(ic)
+		ic.run()
 		return
 
 	# Two-machine network test (see scenes/dev/nettest.gd).

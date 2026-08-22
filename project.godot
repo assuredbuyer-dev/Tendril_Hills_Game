@@ -1,23 +1,15 @@
 ; Engine configuration file.
-; It's best edited using the editor UI and not directly,
-; since the parameters that go here are not all obvious.
-;
-; Format:
-;   [section] ; section goes between []
-;   param=value ; assign values to parameters
+; Tendril Hills — 3D clay build | Tendrel Studios
+; Open with Godot 4.5+  (Import > select this file)
 
 config_version=5
-
-[animation]
-
-compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
 config/name="Tendril Hills"
 config/description="A cozy clay farming world — Tendrel Studios"
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.7", "GL Compatibility")
+config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [autoload]
@@ -34,6 +26,10 @@ window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+# Tablets only. The camera rig and the HUD are both built wide, and
+# the game is unplayable in portrait -- sensor_landscape lets the
+# iPad be held either way up but never turns the game sideways.
+window/handheld/orientation="sensor_landscape"
 
 [physics]
 
@@ -43,5 +39,6 @@ window/stretch/aspect="expand"
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+textures/canvas_textures/default_texture_filter=1
 anti_aliasing/quality/msaa_3d=2
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
