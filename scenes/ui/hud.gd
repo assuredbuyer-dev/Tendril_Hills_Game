@@ -14,6 +14,8 @@ extends CanvasLayer
 
 const PAD := 18
 
+var _roster_panel: PanelContainer
+var _roster_box: VBoxContainer
 var _coin_label: Label
 var _hunger_fill: StyleBoxFlat
 var _hunger_bar: ProgressBar
@@ -55,7 +57,11 @@ func _ready() -> void:
 	_build_shop()
 	_build_craft()
 	_build_help()
+	_build_roster()
 
+	Net.roster_changed.connect(_refresh_roster)
+	Net.mode_changed.connect(_refresh_roster)
+	GameState.roster_or_claims_changed.connect(_refresh_roster)
 	GameState.coins_changed.connect(func(v): _coin_label.text = str(v))
 	GameState.hunger_changed.connect(_refresh_hunger)
 	GameState.inventory_changed.connect(_refresh_inventory)
@@ -178,6 +184,49 @@ func _dock_right(n: Control) -> void:
 func _dock_centre(n: Control) -> void:
 	_dock(n, 0.5, 0.5, Vector2.ZERO,
 		Control.GROW_DIRECTION_BOTH, Control.GROW_DIRECTION_BOTH)
+
+
+# =============================================================
+#  Who else is here — under the coin purse, top right
+# -------------------------------------------------------------
+# Hidden entirely in single player. A panel that says "Players: 1"
+# is just clutter telling you that you are alone.
+# =============================================================
+func _build_roster() -> void:
+	_roster_box = VBoxContainer.new()
+	_roster_box.add_theme_constant_override("separation", 2)
+	_roster_panel = _wrap(_roster_box, Palette.UI_PANEL_DIM, 12)
+	_dock(_roster_panel, 1.0, 0.0, Vector2(-PAD, PAD + 56),
+		Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_END)
+	_roster_panel.visible = false
+	_refresh_roster()
+
+
+func _refresh_roster() -> void:
+	if _roster_box == null:
+		return
+	for c in _roster_box.get_children():
+		c.queue_free()
+	if Net.is_solo():
+		_roster_panel.visible = false
+		return
+	_roster_panel.visible = true
+	var head := label("In the hills", 14, Palette.UI_TEXT_SOFT)
+	_roster_box.add_child(head)
+	for id in Net.roster:
+		var who := Net.name_of(int(id))
+		# Their clearing's colour, so the name in this list matches
+		# the name floating over the Sprite out in the field.
+		var col := Palette.UI_TEXT
+		for i in GameState.homestead_owner.size():
+			if String(GameState.homestead_owner[i]) == who and who != "":
+				col = World.HOMESTEAD_COLOURS[i % World.HOMESTEAD_COLOURS.size()]
+		var line := who
+		if int(id) == Net.my_id():
+			line += "  (you)"
+		if int(id) == 1:
+			line += "  ★"          # the host, whose machine holds the world
+		_roster_box.add_child(label(line, 16, col))
 
 
 # =============================================================

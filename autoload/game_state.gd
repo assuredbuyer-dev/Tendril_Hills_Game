@@ -30,7 +30,7 @@ signal say(who: String, text: String)
 signal portal_unlocked()
 signal hunger_band_changed(band: int)
 
-const SAVE_VERSION := 2   # 2 added materials, gathering and crafted placeables
+const SAVE_VERSION := 3   # 3 added homestead ownership (multiplayer)
 
 # Soil states
 enum Soil { UNTILLED, TILLED, PLANTED, GROWING, READY }
@@ -66,6 +66,15 @@ var onboarding_index: int = 0
 var portal_open: bool = false
 var selected_seed: String = "carrot"
 
+# --- Shared world state (the host owns these) -----------------
+# Which player has claimed each homestead, in Terrain.HOMESTEADS
+# order. "" means nobody yet. Stored by NAME rather than by network
+# id, because ids are handed out fresh every session and a kid
+# expects to walk back into the same clearing tomorrow.
+var homestead_owner: Array = []
+
+signal roster_or_claims_changed()
+
 var _hunger_accum: float = 0.0
 var _belly_band: int = Belly.FINE
 var _rng := RandomNumberGenerator.new()
@@ -74,6 +83,8 @@ var _rng := RandomNumberGenerator.new()
 func _ready() -> void:
 	_rng.randomize()
 	_build_plot_layout()
+	homestead_owner.resize(Terrain.HOMESTEADS.size())
+	homestead_owner.fill("")
 	var data := SaveManager.load_game()
 	if data.is_empty():
 		_new_game()
@@ -188,20 +199,11 @@ func hive_progress(index: int) -> float:
 
 
 func collect_hive(index: int) -> bool:
-	if hive_progress(index) < 1.0:
-		Sfx.play("deny")
-		var left := int(ceilf(Defs.HIVE_SECONDS * (1.0 - hive_progress(index))))
-		_note("The bees are still working — about %ds" % left, Palette.UI_TEXT_SOFT)
-		return false
-	larder["honey"] = int(larder.get("honey", 0)) + 1
-	placed[index]["filled_at"] = Time.get_unix_time_from_system()
-	Sfx.play("coin")
-	_bump("honey_taken")
-	inventory_changed.emit()
-	placed_changed.emit()
-	_note("Collected a jar of honey!", Palette.WARM_YELLOW)
-	SaveManager.mark_dirty()
-	_check_quests()
+	if Net.has_authority():
+		var r := _host_hive(index)
+		_apply_personal(r)
+		return r.has("gain_crop")
+	_req_hive.rpc_id(1, index)
 	return true
 
 
@@ -234,67 +236,88 @@ func plot_progress(index: int) -> float:
 #  Interacting with a plot always does the obvious next thing.
 # =============================================================
 
+## What the player presses. In solo play or on the host this runs
+## the rules directly; on a client it asks the host and waits.
+##
+## The split matters: the PLOT is shared world state and only the
+## host may change it, but the SEED it costs and the CARROT it
+## yields are in the actor's own pockets, which the host cannot see
+## and has no business owning. So the actor sends what it has, the
+## host decides what happens to the world, and it tells the actor
+## what to do to its own basket.
 func interact_plot(index: int) -> void:
+	var ctx := {
+		"seed": selected_seed,
+		"seed_n": seed_count(selected_seed),
+		"well_fed": belly_band() == Belly.WELL_FED,
+	}
+	if Net.has_authority():
+		_apply_personal(_host_plot_action(index, Net.my_id(), ctx))
+	else:
+		_req_plot.rpc_id(1, index, ctx)
+
+
+## Runs on the authority only. Mutates the plot, tells everyone,
+## and returns the personal side-effects for whoever asked.
+func _host_plot_action(index: int, actor_id: int, ctx: Dictionary) -> Dictionary:
+	if index < 0 or index >= plots.size():
+		return {}
 	var p: Dictionary = plots[index]
+	var out := {}
 	match int(p["state"]):
 		Soil.UNTILLED:
 			p["state"] = Soil.TILLED
-			Sfx.play("water")
-			_advance_onboarding("till")
-			_note("Soil turned over", Palette.EARTH)
+			out = {"sfx": "water", "note": "Soil turned over",
+				"colour": Palette.EARTH, "step": "till"}
 		Soil.TILLED:
-			if seed_count(selected_seed) <= 0:
-				Sfx.play("deny")
-				_note("No %s seeds — buy some at the stall" % _crop_name(selected_seed), Palette.UI_WARN)
-				return
-			seeds[selected_seed] = seed_count(selected_seed) - 1
-			p["crop"] = selected_seed
+			var seed_id := String(ctx.get("seed", ""))
+			if int(ctx.get("seed_n", 0)) <= 0:
+				# Nothing happens to the world, so nothing is broadcast.
+				return {"sfx": "deny", "colour": Palette.UI_WARN,
+					"note": "No %s seeds — buy some at the stall" % _crop_name(seed_id)}
+			p["crop"] = seed_id
 			p["state"] = Soil.PLANTED
-			Sfx.play("pop")
-			inventory_changed.emit()
-			_advance_onboarding("plant")
-			_note("Planted a %s seed" % _crop_name(selected_seed), Palette.MOSS)
+			out = {"sfx": "pop", "spend_seed": seed_id, "step": "plant",
+				"note": "Planted a %s seed" % _crop_name(seed_id),
+				"colour": Palette.MOSS}
 		Soil.PLANTED:
 			p["state"] = Soil.GROWING
 			p["watered_at"] = Time.get_unix_time_from_system()
 			p["speed"] = growth_speed_at(float(p["x"]), float(p["z"]))
-			Sfx.play("water")
-			_bump("waters")
-			_advance_onboarding("water")
+			out = {"sfx": "water", "bump": "waters", "step": "water",
+				"note": "Watered", "colour": Palette.SKY_BLUE}
 			if float(p["speed"]) > 1.01:
-				_note("Watered — the scarecrow is helping this one along",
-					Palette.WARM_YELLOW)
-			else:
-				_note("Watered", Palette.SKY_BLUE)
+				out["note"] = "Watered — the scarecrow is helping this one along"
+				out["colour"] = Palette.WARM_YELLOW
 		Soil.GROWING:
-			Sfx.play("deny")
 			var left := int(ceilf(_plot_grow_time(p) * (1.0 - plot_progress(index))))
-			_note("Still growing — about %ds to go" % left, Palette.UI_TEXT_SOFT)
-			return
+			return {"sfx": "deny", "colour": Palette.UI_TEXT_SOFT,
+				"note": "Still growing — about %ds to go" % left}
 		Soil.READY:
+			# The one place ownership bites. Anyone may till, plant and
+			# water anywhere -- helping is always allowed -- but the
+			# crop belongs to whoever's clearing it grew in.
+			if not may_harvest(index, actor_id):
+				var owner := owner_of_plot(index)
+				return {"sfx": "deny", "colour": Palette.UI_WARN,
+					"note": "These are %s's — you can water them, but not pull them up" % owner}
 			var crop: String = p["crop"]
-			# A well-fed Sprite sometimes pulls up two. This is the whole
-			# reward for keeping the belly bar high -- no penalty anywhere.
 			var yield_n := 1
-			if belly_band() == Belly.WELL_FED and _rng.randf() < Defs.WELL_FED_BONUS_CHANCE:
+			if bool(ctx.get("well_fed", false)) and _rng.randf() < Defs.WELL_FED_BONUS_CHANCE:
 				yield_n = 2
-			larder[crop] = int(larder.get(crop, 0)) + yield_n
 			p["state"] = Soil.UNTILLED
 			p["crop"] = ""
 			p["watered_at"] = 0.0
-			Sfx.play("pop")
-			for _n in yield_n:
-				_bump("%s_harvested" % crop)
-				_bump("harvests")
-			inventory_changed.emit()
-			_advance_onboarding("harvest")
+			out = {"sfx": "pop", "gain_crop": crop, "gain_n": yield_n,
+				"step": "harvest", "colour": Palette.CARROT,
+				"note": "Harvested a %s!" % _crop_name(crop)}
 			if yield_n > 1:
-				_note("Two %ss! A full belly pays." % _crop_name(crop).to_lower(), Palette.WARM_YELLOW)
-			else:
-				_note("Harvested a %s!" % _crop_name(crop), Palette.CARROT)
+				out["note"] = "Two %ss! A full belly pays." % _crop_name(crop).to_lower()
+				out["colour"] = Palette.WARM_YELLOW
+	_broadcast_plot(index)
 	plot_changed.emit(index)
 	SaveManager.mark_dirty()
-	_check_quests()
+	return out
 
 
 # =============================================================
@@ -449,17 +472,13 @@ func is_gathered(node_id: int) -> bool:
 
 
 func gather(node_id: int, material: String) -> bool:
+	if Net.has_authority():
+		var r := _host_gather(node_id, material)
+		_apply_personal(r)
+		return r.has("gain_material")
 	if is_gathered(node_id):
 		return false
-	materials[material] = material_count(material) + 1
-	gathered[node_id] = Time.get_unix_time_from_system() + Defs.GATHER_RESPAWN_SECONDS
-	Sfx.play("pop")
-	_bump("gathered")
-	materials_changed.emit()
-	gathered_changed.emit(node_id)
-	_note("Picked up a %s" % String(Defs.MATERIALS[material]["name"]), Palette.MOSS)
-	SaveManager.mark_dirty()
-	_check_quests()
+	_req_gather.rpc_id(1, node_id, material)
 	return true
 
 
@@ -579,36 +598,25 @@ func placement_problem(recipe_id: String, x: float, z: float,
 
 func place_build(recipe_id: String, x: float, z: float, yaw: float,
 		player_pos: Vector3 = Vector3.INF) -> bool:
+	# The bag is yours, so this check is yours and happens here on
+	# your own machine whether you are host or guest.
 	if bag_count(recipe_id) <= 0:
 		Sfx.play("deny")
 		_note("Craft one at the workbench first", Palette.UI_WARN)
 		return false
+	if Net.has_authority():
+		var r := _host_place(recipe_id, x, z, yaw, Net.my_id(), player_pos)
+		_apply_personal(r)
+		return r.has("spend_build")
+	# A guest checks placement locally too -- not because the host
+	# will not check, but so a bad spot says so instantly instead of
+	# after a round trip.
 	var problem := placement_problem(recipe_id, x, z, player_pos)
 	if problem != "":
 		Sfx.play("deny")
 		_note(problem, Palette.UI_WARN)
 		return false
-
-	build_bag[recipe_id] = bag_count(recipe_id) - 1
-	if bag_count(recipe_id) <= 0:
-		build_bag.erase(recipe_id)
-		cycle_build()
-	var entry := {"id": recipe_id, "x": x, "z": z, "yaw": yaw}
-	if recipe_id == "hive":
-		entry["filled_at"] = Time.get_unix_time_from_system()
-	placed.append(entry)
-	if recipe_id == "scarecrow":
-		_bump("scarecrows")
-	Sfx.play("chime")
-	placed_changed.emit()
-	materials_changed.emit()
-	if recipe_id == "house":
-		_bump("houses")
-		_note("A new home in Tendril Hills!", Palette.DEEP_RED)
-	else:
-		_note("Placed a %s" % String(Defs.RECIPES[recipe_id]["name"]), Palette.MOSS)
-	SaveManager.mark_dirty()
-	_check_quests()
+	_req_place.rpc_id(1, recipe_id, x, z, yaw)
 	return true
 
 
@@ -712,6 +720,7 @@ func to_save_dict() -> Dictionary:
 		})
 	return {
 		"version": SAVE_VERSION,
+		"homestead_owner": homestead_owner,
 		"coins": coins,
 		"hunger": hunger,
 		"seeds": seeds,
@@ -765,6 +774,14 @@ func _load_from(d: Dictionary) -> void:
 	portal_open = bool(d.get("portal_open", false))
 	selected_seed = String(d.get("selected_seed", "carrot"))
 
+	# Who owns which clearing. Sized against the current HOMESTEADS
+	# list rather than trusting the file, so adding a fifth homestead
+	# does not need a migration.
+	var owners: Array = d.get("homestead_owner", [])
+	homestead_owner.resize(Terrain.HOMESTEADS.size())
+	for i in homestead_owner.size():
+		homestead_owner[i] = String(owners[i]) if i < owners.size() else ""
+
 	var saved: Array = d.get("plots", [])
 	for i in mini(saved.size(), plots.size()):
 		var s: Dictionary = saved[i]
@@ -794,3 +811,383 @@ func wipe_and_restart() -> void:
 	inventory_changed.emit()
 	quests_changed.emit()
 	_note("Fresh save — starting over", Palette.UI_TEXT_SOFT)
+
+
+# =============================================================
+#  MULTIPLAYER — the shared half of the world
+# -------------------------------------------------------------
+# Only four things are shared: the soil, the pickups, the
+# buildings, and who owns which homestead. Everything else in this
+# file -- coins, seeds, basket, pouch, hunger, quests -- is yours
+# alone and never leaves your machine.
+#
+# Every function below is one of three kinds, and it is worth
+# knowing which you are looking at:
+#
+#   request_*   runs on YOUR machine. Asks, or just does it if you
+#               are the host.
+#   _host_*     runs on the HOST only. Decides, changes the world,
+#               tells everyone.
+#   _set_* / _apply_*  runs on EVERYONE. Takes what the host said
+#               and makes it so. Never decides anything.
+#
+# There is no anti-cheat here and there should not be. This is four
+# siblings on one wifi network; the failure mode we are designing
+# against is confusion, not fraud.
+# =============================================================
+
+# --- Who owns what -------------------------------------------
+
+## Which homestead does this plot belong to? -1 for the shared farm.
+func homestead_of_plot(index: int) -> int:
+	var shared := PLOT_COLS * PLOT_ROWS
+	if index < shared:
+		return -1
+	var per := HOMESTEAD_COLS * HOMESTEAD_ROWS
+	return (index - shared) / per
+
+
+func owner_of_plot(index: int) -> String:
+	var h := homestead_of_plot(index)
+	if h < 0 or h >= homestead_owner.size():
+		return ""
+	return String(homestead_owner[h])
+
+
+## The shared farm is everyone's. An unclaimed homestead is
+## everyone's. A claimed one belongs to the kid who claimed it.
+func may_harvest(index: int, actor_id: int) -> bool:
+	var owner := owner_of_plot(index)
+	if owner == "":
+		return true
+	return owner == Net.name_of(actor_id)
+
+
+func my_homestead() -> int:
+	for i in homestead_owner.size():
+		if String(homestead_owner[i]) == Net.player_name and Net.player_name != "":
+			return i
+	return -1
+
+
+# --- Claiming a homestead ------------------------------------
+
+func request_claim(homestead: int) -> void:
+	if Net.has_authority():
+		_apply_personal(_host_claim(homestead, Net.my_id()))
+	else:
+		_req_claim.rpc_id(1, homestead)
+
+
+func _host_claim(homestead: int, actor_id: int) -> Dictionary:
+	if homestead < 0 or homestead >= homestead_owner.size():
+		return {}
+	var who := Net.name_of(actor_id)
+	if who == "":
+		return {}
+	var current := String(homestead_owner[homestead])
+	if current == who:
+		return {"note": "This is already yours.", "colour": Palette.MOSS}
+	if current != "":
+		return {"sfx": "deny", "colour": Palette.UI_WARN,
+			"note": "%s got here first. There are other clearings." % current}
+	# One clearing each. Claiming a second releases the first, which
+	# is friendlier than refusing and leaving them stuck.
+	for i in homestead_owner.size():
+		if String(homestead_owner[i]) == who:
+			homestead_owner[i] = ""
+	homestead_owner[homestead] = who
+	_broadcast_claims()
+	SaveManager.mark_dirty()
+	return {"sfx": "chime", "colour": Palette.WARM_YELLOW,
+		"note": "%s is yours now." % String(Terrain.HOMESTEADS[homestead]["name"])}
+
+
+func _broadcast_claims() -> void:
+	if Net.is_host():
+		_set_claims.rpc(homestead_owner)
+	roster_or_claims_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _set_claims(owners: Array) -> void:
+	homestead_owner = owners
+	roster_or_claims_changed.emit()
+	plots_rebuilt.emit()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _req_claim(homestead: int) -> void:
+	if not Net.is_host():
+		return
+	var from := multiplayer.get_remote_sender_id()
+	_personal_result.rpc_id(from, _host_claim(homestead, from))
+
+
+# --- Soil ----------------------------------------------------
+
+@rpc("any_peer", "call_remote", "reliable")
+func _req_plot(index: int, ctx: Dictionary) -> void:
+	if not Net.is_host():
+		return
+	var from := multiplayer.get_remote_sender_id()
+	_personal_result.rpc_id(from, _host_plot_action(index, from, ctx))
+
+
+func _broadcast_plot(index: int) -> void:
+	if Net.is_host():
+		_set_plot.rpc(index, plots[index].duplicate())
+
+
+@rpc("authority", "call_remote", "reliable")
+func _set_plot(index: int, data: Dictionary) -> void:
+	if index < 0 or index >= plots.size():
+		return
+	# x and z are layout, not state -- they come from the terrain and
+	# must never be overwritten by the wire.
+	for k in ["state", "crop", "watered_at", "speed"]:
+		if data.has(k):
+			plots[index][k] = data[k]
+	plot_changed.emit(index)
+
+
+# --- Pickups -------------------------------------------------
+
+func request_gather(node_id: int, material: String) -> void:
+	if Net.has_authority():
+		_apply_personal(_host_gather(node_id, material))
+	else:
+		_req_gather.rpc_id(1, node_id, material)
+
+
+func _host_gather(node_id: int, material: String) -> Dictionary:
+	if is_gathered(node_id):
+		# Two kids grabbing the same mushroom is a normal race, not an
+		# error. Whoever's packet arrived first gets it.
+		return {"sfx": "deny", "colour": Palette.UI_TEXT_SOFT,
+			"note": "Someone got there first."}
+	gathered[node_id] = Time.get_unix_time_from_system() + Defs.GATHER_RESPAWN_SECONDS
+	_broadcast_gathered(node_id)
+	gathered_changed.emit(node_id)
+	SaveManager.mark_dirty()
+	return {"sfx": "pop", "gain_material": material, "colour": Palette.MOSS,
+		"note": "Picked up a %s" % String(Defs.MATERIALS[material]["name"]).to_lower()}
+
+
+func _broadcast_gathered(node_id: int) -> void:
+	if Net.is_host():
+		_set_gathered.rpc(node_id, float(gathered[node_id]))
+
+
+@rpc("authority", "call_remote", "reliable")
+func _set_gathered(node_id: int, regrow_at: float) -> void:
+	gathered[node_id] = regrow_at
+	gathered_changed.emit(node_id)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _req_gather(node_id: int, material: String) -> void:
+	if not Net.is_host():
+		return
+	var from := multiplayer.get_remote_sender_id()
+	_personal_result.rpc_id(from, _host_gather(node_id, material))
+
+
+## Host only: hand back everything whose timer has run out, and tell
+## the clients. Clients never expire pickups on their own, or four
+## machines would disagree about the exact second.
+func _host_regrow() -> void:
+	if not Net.has_authority():
+		return
+	var back := take_regrown()
+	if back.is_empty():
+		return
+	if Net.is_host():
+		_set_regrown.rpc(back)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _set_regrown(ids: Array) -> void:
+	for id in ids:
+		gathered.erase(int(id))
+		gathered_changed.emit(int(id))
+
+
+# --- Buildings -----------------------------------------------
+
+func request_place(recipe_id: String, x: float, z: float, yaw: float) -> void:
+	if Net.has_authority():
+		_apply_personal(_host_place(recipe_id, x, z, yaw, Net.my_id()))
+	else:
+		_req_place.rpc_id(1, recipe_id, x, z, yaw)
+
+
+func _host_place(recipe_id: String, x: float, z: float, yaw: float,
+		actor_id: int, player_pos: Vector3 = Vector3.INF) -> Dictionary:
+	var problem := placement_problem(recipe_id, x, z, player_pos)
+	if problem != "":
+		return {"sfx": "deny", "colour": Palette.UI_WARN, "note": problem}
+	var entry := {"id": recipe_id, "x": x, "z": z, "yaw": yaw,
+		"by": Net.name_of(actor_id)}
+	if recipe_id == "hive":
+		entry["filled_at"] = Time.get_unix_time_from_system()
+	placed.append(entry)
+	_broadcast_placed()
+	SaveManager.mark_dirty()
+	var out := {"sfx": "chime", "spend_build": recipe_id, "colour": Palette.MOSS,
+		"note": "Placed a %s" % String(Defs.RECIPES[recipe_id]["name"])}
+	if recipe_id == "house":
+		out["bump"] = "houses"
+		out["note"] = "A new home in Tendril Hills!"
+		out["colour"] = Palette.DEEP_RED
+	elif recipe_id == "scarecrow":
+		out["bump"] = "scarecrows"
+	return out
+
+
+func _broadcast_placed() -> void:
+	if Net.is_host():
+		_set_placed.rpc(placed.duplicate(true))
+	placed_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _set_placed(list: Array) -> void:
+	placed = list
+	placed_changed.emit()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _req_place(recipe_id: String, x: float, z: float, yaw: float) -> void:
+	if not Net.is_host():
+		return
+	var from := multiplayer.get_remote_sender_id()
+	_personal_result.rpc_id(from, _host_place(recipe_id, x, z, yaw, from))
+
+
+# --- Hives ---------------------------------------------------
+
+func request_hive(index: int) -> void:
+	if Net.has_authority():
+		_apply_personal(_host_hive(index))
+	else:
+		_req_hive.rpc_id(1, index)
+
+
+func _host_hive(index: int) -> Dictionary:
+	if index < 0 or index >= placed.size():
+		return {}
+	var h: Dictionary = placed[index]
+	if String(h.get("id", "")) != "hive":
+		return {}
+	if hive_progress(index) < 1.0:
+		var left := int(ceilf(Defs.HIVE_SECONDS * (1.0 - hive_progress(index))))
+		return {"sfx": "deny", "colour": Palette.UI_TEXT_SOFT,
+			"note": "The bees are still working — about %ds" % left}
+	h["filled_at"] = Time.get_unix_time_from_system()
+	_broadcast_placed()
+	SaveManager.mark_dirty()
+	return {"sfx": "coin", "gain_crop": "honey", "gain_n": 1,
+		"bump": "honey_taken", "colour": Palette.WARM_YELLOW,
+		"note": "Collected a jar of honey!"}
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _req_hive(index: int) -> void:
+	if not Net.is_host():
+		return
+	var from := multiplayer.get_remote_sender_id()
+	_personal_result.rpc_id(from, _host_hive(index))
+
+
+# --- What the host tells you to do with your own pockets ------
+
+@rpc("authority", "call_remote", "reliable")
+func _personal_result(r: Dictionary) -> void:
+	_apply_personal(r)
+
+
+## Runs on the actor's machine only. The host has already decided;
+## this just carries it out. Nothing here touches shared state.
+func _apply_personal(r: Dictionary) -> void:
+	if r.is_empty():
+		return
+	if r.has("sfx"):
+		Sfx.play(String(r["sfx"]))
+	if r.has("spend_seed"):
+		var sid := String(r["spend_seed"])
+		seeds[sid] = maxi(0, seed_count(sid) - 1)
+		inventory_changed.emit()
+	if r.has("gain_crop"):
+		var crop := String(r["gain_crop"])
+		var n := int(r.get("gain_n", 1))
+		larder[crop] = int(larder.get(crop, 0)) + n
+		# Honey comes out of a hive, not out of the ground, so it must
+		# not count toward the harvest quests.
+		if crop != "honey":
+			for _i in n:
+				_bump("%s_harvested" % crop)
+				_bump("harvests")
+		inventory_changed.emit()
+	if r.has("gain_material"):
+		var m := String(r["gain_material"])
+		materials[m] = material_count(m) + 1
+		_bump("gathered")
+		materials_changed.emit()
+	if r.has("spend_build"):
+		var b := String(r["spend_build"])
+		build_bag[b] = maxi(0, bag_count(b) - 1)
+		if int(build_bag[b]) <= 0:
+			build_bag.erase(b)
+			if selected_build == b:
+				cycle_build()
+		inventory_changed.emit()
+	if r.has("bump"):
+		_bump(String(r["bump"]))
+	if r.has("step"):
+		_advance_onboarding(String(r["step"]))
+	if r.has("note"):
+		_note(String(r["note"]), r.get("colour", Palette.UI_TEXT))
+	SaveManager.mark_dirty()
+	_check_quests()
+
+
+# --- Handing the world to somebody who just arrived -----------
+
+## Host only. Called by Net when a client finishes connecting.
+func send_world_to(id: int) -> void:
+	if not Net.is_host():
+		return
+	var plot_state: Array = []
+	for p in plots:
+		plot_state.append({"state": p["state"], "crop": p["crop"],
+			"watered_at": p["watered_at"], "speed": p.get("speed", 1.0)})
+	_set_world.rpc_id(id, {
+		"plots": plot_state,
+		"gathered": gathered,
+		"placed": placed,
+		"owners": homestead_owner,
+	})
+
+
+@rpc("authority", "call_remote", "reliable")
+func _set_world(d: Dictionary) -> void:
+	# Note what is NOT in here: coins, seeds, basket, pouch, hunger,
+	# quests. Joining somebody's world does not touch your things.
+	var incoming: Array = d.get("plots", [])
+	for i in mini(incoming.size(), plots.size()):
+		var src: Dictionary = incoming[i]
+		plots[i]["state"] = int(src.get("state", Soil.UNTILLED))
+		plots[i]["crop"] = String(src.get("crop", ""))
+		plots[i]["watered_at"] = float(src.get("watered_at", 0.0))
+		plots[i]["speed"] = float(src.get("speed", 1.0))
+	gathered = d.get("gathered", {})
+	placed = d.get("placed", [])
+	homestead_owner = d.get("owners", [])
+	if homestead_owner.size() != Terrain.HOMESTEADS.size():
+		homestead_owner.resize(Terrain.HOMESTEADS.size())
+	plots_rebuilt.emit()
+	placed_changed.emit()
+	roster_or_claims_changed.emit()
+	for id in gathered:
+		gathered_changed.emit(int(id))

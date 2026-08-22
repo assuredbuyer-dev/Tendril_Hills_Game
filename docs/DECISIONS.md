@@ -416,3 +416,111 @@ The village, the farm, the portal, spawn, and the whole first
 half-hour of the game are exactly where they were. A kid who has
 been playing this all week walks out of the meadow into the same
 scene. Everything new is somewhere they have not been yet.
+
+---
+
+## Same-house co-op, and what it cost
+
+*Added 21 Aug 2026. The kids wanted to play together, each with
+their own farm and house.*
+
+Chosen: **one host machine, four-plus guests, same wifi, Mac only.**
+Rejected: internet play (needs port forwarding or a rented relay, and
+breaks in ways nobody in this house can debug) and async
+world-sharing through git (not what "multiplayer" means to a nine
+year old).
+
+Dropping the browser target is what made it easy. ENet is UDP; a
+browser cannot open a UDP socket. Keeping web multiplayer would have
+meant WebSockets or WebRTC plus a signalling server — a lot of
+machinery for a build nobody here uses. The web export still works,
+single-player.
+
+### The split that made it an evening instead of a rewrite
+
+> The host owns the world. Every player owns their own pockets.
+
+Exactly four things are shared: `plots`, `gathered`, `placed`,
+`homestead_owner`. Everything else — coins, seeds, basket, pouch,
+hunger, quests — is private and never leaves the machine it is on.
+
+This is the payoff from the very first architectural decision in this
+file: **GameState holds every rule; the world and HUD only listen.**
+That single autoload became the host's authority nearly unchanged. If
+the rules had been spread across `world.gd` and `hud.gd` — which is
+the natural place to put them and what the first draft of most games
+does — every rule would have had to be found and moved before any
+networking could start.
+
+Worth stating plainly, because it is the whole argument for that
+early constraint: an architectural rule that costs a little every day
+paid for itself completely, once, four weeks later.
+
+### Actions return "personal effects"
+
+Tilling is shared; the seed it costs is not, and the host cannot see
+your pouch. So the actor sends what it has, the host decides what
+happens to the world, and it replies with what the actor should do to
+its own basket — `{"spend_seed": "carrot"}`,
+`{"gain_crop": "turnip", "gain_n": 2}`. Three prefixes mark which
+machine a function runs on: `request_*` (yours), `_host_*` (the
+host's), `_set_*` / `_apply_*` (everyone's).
+
+Harvest refusal falls out of this for free: the host simply does not
+send back a `gain_crop`.
+
+### Ownership: water anywhere, harvest at home
+
+Anyone may till, plant and water any soil in the world. Only the
+owner may harvest from their own clearing; the big shared farm east
+of the village stays free-for-all.
+
+This was a social decision, not a technical one. Full co-op is
+simpler to build and lovelier when it works, but "he pulled up my
+turnips" is a real thing that happens between siblings, and a game
+that generates that argument every evening does not get played.
+Watering stays open because helping should never be blocked.
+
+### Discovery, because nobody types an IP
+
+The host broadcasts a small JSON packet on UDP 27016 once a second.
+Every other copy listens and turns each name into a button. Hosts
+that go quiet for four seconds drop off the list.
+
+This is the difference between "click your sister's name" and "ask
+Dad what the IP is", and it is about eighty lines. Broadcast does not
+leave the house, so nothing is exposed and no ports are opened.
+
+### No anti-cheat, on purpose
+
+A guest is trusted about its own pockets and could lie about its
+seeds. This is four siblings on one wifi. The failure mode being
+designed against is confusion, not fraud.
+
+### The real constraint
+
+The host's save **is** the world. Tendril Hills exists when that
+machine is running it. Pick one host and keep it — different machines
+hosting on different days means diverging worlds and no way to merge
+them. This was chosen deliberately over a movable save file, because
+the failure mode there is loading a stale copy over a newer one and
+silently losing an evening's work.
+
+Ownership is keyed by player **name**, not by network id, because ids
+are handed out fresh each session and a kid expects to walk back into
+the same clearing tomorrow. `player_name.txt` sits next to the save
+so the name is not retyped slightly differently.
+
+### selftest.sh cannot test any of this
+
+On one machine every networked call short-circuits to "I have
+authority, just do it", so the 212 existing checks pass whether the
+wire works or not. `tools/nettest.sh` starts a real host and a real
+guest as two processes with separate save directories and makes the
+**guest** prove things about the **host's** world. That indirection
+is the test: a guest's plot only changes when the host broadcasts it.
+
+Discovery is reported but not asserted there. Whether a UDP broadcast
+comes back depends on the network, and a CI runner is not a living
+room — failing builds over that would teach everyone to ignore red
+X's, which costs more than the coverage is worth.

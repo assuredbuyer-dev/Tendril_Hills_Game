@@ -31,6 +31,11 @@ func setup(main: Node3D) -> void:
 			_out = arg.substr(6)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_out))
 	_shots = [
+		# The join screen, and the HUD with other players in it. Both
+		# are new layout, and HUD layout in this project has exploded
+		# across the screen twice. It gets photographed.
+		{"name": "00_lobby", "pos": Vector3(0, 0, 12.0), "yaw": 0.0, "wait": 0.5,
+		 "lobby": true},
 		{"name": "01_spawn",     "pos": Vector3(0, 0, 12.0),   "yaw": 0.0,   "wait": 1.2},
 		{"name": "02_village",   "pos": Vector3(2.0, 0, 5.0),  "yaw": 0.5,   "wait": 0.6},
 		{"name": "03_stall",     "pos": Vector3(5.0, 0, 4.6),  "yaw": 0.2,   "wait": 0.6},
@@ -96,6 +101,19 @@ func _run() -> void:
 		# still buried in whatever it is about to push out of.
 		await get_tree().physics_frame
 		await get_tree().physics_frame
+		# The lobby is its own thing: photograph it and move on.
+		if bool(shot.get("lobby", false)):
+			var lb := Lobby.new()
+			_main.add_child(lb)
+			await get_tree().create_timer(0.5).timeout
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(
+				"%s/%s.png" % [_out, shot["name"]])
+			print("[capture] ", shot["name"])
+			lb.queue_free()
+			await get_tree().process_frame
+			continue
+
 		# Landscape shots turn the HUD off. Two thirds of the screen is
 		# interface, and you cannot judge a horizon you cannot see.
 		_main.hud.visible = not bool(shot.get("bare", false))
@@ -152,6 +170,20 @@ func _seed_demo_state() -> void:
 		{"id": "planter", "x": 3.6, "z": 7.6, "yaw": 40.0},
 		{"id": "sign", "x": -2.6, "z": 9.2, "yaw": -20.0},
 	]
+	# Pretend we are hosting a full house. No socket is opened -- this
+	# is only so the roster panel and the name tags have something to
+	# render for the photograph.
+	Net.mode = Net.Mode.HOST
+	Net.player_name = "AJ"
+	Net.roster = {
+		1: {"name": "AJ", "homestead": 0},
+		2: {"name": "Rosie", "homestead": 1},
+		3: {"name": "Sam", "homestead": 2},
+	}
+	GameState.homestead_owner = ["AJ", "Rosie", "Sam", ""]
+	Net.roster_changed.emit()
+	GameState.roster_or_claims_changed.emit()
+
 	GameState.plots_rebuilt.emit()
 	GameState.placed_changed.emit()
 	GameState.materials_changed.emit()

@@ -34,6 +34,7 @@ var _placed_interactables: Array = []
 var _portal_veil: MeshInstance3D
 var _portal_arch: Node3D
 var _rng := RandomNumberGenerator.new()
+var _remotes: Dictionary = {}       # peer id -> RemotePlayer
 
 
 func _ready() -> void:
@@ -54,6 +55,10 @@ func _ready() -> void:
 	GameState.placed_changed.connect(_rebuild_placed)
 	GameState.gathered_changed.connect(_hide_gatherable)
 	GameState.portal_unlocked.connect(_open_portal)
+	Net.remote_moved.connect(_on_remote_moved)
+	Net.remote_left.connect(_on_remote_left)
+	Net.roster_changed.connect(_refresh_remote_names)
+	GameState.roster_or_claims_changed.connect(_refresh_remote_names)
 	if GameState.portal_open:
 		_open_portal()
 
@@ -391,6 +396,47 @@ func _open_portal() -> void:
 
 
 # =============================================================
+#  The other players
+# -------------------------------------------------------------
+# Puppets, created the first time we hear from somebody and freed
+# when they leave. Nothing here decides anything -- see
+# remote_player.gd.
+# =============================================================
+func _on_remote_moved(id: int, pos: Vector3, yaw: float, hop: bool) -> void:
+	if id == Net.my_id():
+		return
+	if not _remotes.has(id):
+		var rp := RemotePlayer.new()
+		rp.setup(id, Net.name_of(id), _colour_for_player(id))
+		add_child(rp)
+		rp.global_position = pos
+		_remotes[id] = rp
+	(_remotes[id] as RemotePlayer).move_to(pos, yaw, hop)
+
+
+func _on_remote_left(id: int) -> void:
+	if _remotes.has(id):
+		(_remotes[id] as Node).queue_free()
+		_remotes.erase(id)
+
+
+func _refresh_remote_names() -> void:
+	for id in _remotes:
+		var rp: RemotePlayer = _remotes[id]
+		rp.set_display_name(Net.name_of(int(id)))
+
+
+## A player wears the colour of the clearing they claimed. Before
+## they claim one they are cream, like the mushroom stems.
+func _colour_for_player(id: int) -> Color:
+	var who := Net.name_of(id)
+	for i in GameState.homestead_owner.size():
+		if String(GameState.homestead_owner[i]) == who and who != "":
+			return HOMESTEAD_COLOURS[i % HOMESTEAD_COLOURS.size()]
+	return Palette.CREAM
+
+
+# =============================================================
 #  Homesteads — one clearing per player
 # =============================================================
 # The layout lives in Terrain.HOMESTEADS. This function only
@@ -718,9 +764,14 @@ func _refresh_hives() -> void:
 		_rebuild_placed()
 
 
+## Something was picked -- or grew back. One handler for both, because
+## in multiplayer the picking might have been somebody else and the
+## regrowing is always the host, so this node cannot assume it was us.
 func _hide_gatherable(node_id: int) -> void:
-	if _gatherables.has(node_id):
-		var n: Node3D = _gatherables[node_id]
+	if not _gatherables.has(node_id):
+		return
+	var n: Node3D = _gatherables[node_id]
+	if GameState.is_gathered(node_id):
 		# A small pop rather than a blink — it reads as being picked.
 		var tw := create_tween()
 		tw.tween_property(n, "scale", Vector3(1.25, 0.6, 1.25), 0.08)
@@ -728,6 +779,11 @@ func _hide_gatherable(node_id: int) -> void:
 		tw.tween_callback(func():
 			n.visible = false
 			n.scale = Vector3.ONE)
+	else:
+		n.visible = true
+		n.scale = Vector3.ZERO
+		create_tween().tween_property(n, "scale", Vector3.ONE, 0.35) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 ## Slow tick: put back anything whose regrow time has passed. Scenery,
@@ -736,15 +792,14 @@ func _start_regrow_timer() -> void:
 	var t := Timer.new()
 	t.wait_time = 1.0
 	t.autostart = true
+	# Only the host expires pickups, and it tells everyone. If each
+	# machine ran its own timer they would disagree about the exact
+	# second a mushroom came back, and two kids would see different
+	# meadows. The reveal itself happens in _hide_gatherable, off the
+	# gathered_changed signal, so it looks the same wherever it began.
 	t.timeout.connect(func():
 		_refresh_hives()
-		for id in GameState.take_regrown():
-			if _gatherables.has(id):
-				var n: Node3D = _gatherables[id]
-				n.visible = true
-				n.scale = Vector3.ZERO
-				create_tween().tween_property(n, "scale", Vector3.ONE, 0.35) \
-					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT))
+		GameState._host_regrow())
 	add_child(t)
 
 

@@ -74,6 +74,9 @@ var _coyote: float = 0.0
 var _jump_buffer: float = 0.0
 var _air_time: float = 0.0
 var _was_on_floor: bool = true
+# Set for one frame when we jump, so Net can send "they hopped" once
+# instead of streaming the whole arc. See remote_player.gd.
+var _net_hopped: bool = false
 var _current_target: Dictionary = {}
 var _build_mode: bool = false
 var _ghost: Node3D
@@ -182,6 +185,7 @@ func _physics_process(delta: float) -> void:
 		_jump_buffer = 0.0
 		_coyote = 0.0
 		_stretch = 1.0
+		_net_hopped = true
 		Sfx.play("jump")
 	elif on_floor and velocity.y <= 0.0:
 		velocity.y = -1.0          # stay stuck to slopes
@@ -201,6 +205,12 @@ func _physics_process(delta: float) -> void:
 	if wish.length() > 0.1:
 		var want_yaw := atan2(-wish.x, -wish.z)
 		_rig.rotation.y = lerp_angle(_rig.rotation.y, want_yaw, TURN_SPEED * delta)
+
+	# Tell the others where we are. Net decides how often; a jump is
+	# flagged so it goes out immediately rather than waiting for the
+	# next tick, because a hop that arrives late has already landed.
+	Net.send_my_position(delta, global_position, _rig.rotation.y, _net_hopped)
+	_net_hopped = false
 
 
 func _process(delta: float) -> void:
@@ -435,6 +445,21 @@ func _talk_to_sprout() -> void:
 ## map is a place with a name rather than a patch of grass.
 func _read_signpost(index: int) -> void:
 	var hs: Dictionary = Terrain.HOMESTEADS[index]
+	var owner := String(GameState.homestead_owner[index]) \
+		if index < GameState.homestead_owner.size() else ""
+
+	# Nobody has taken it: pressing E here is how you claim it. That
+	# is the whole flow -- walk somewhere you like, press the button
+	# you already press for everything else.
+	if owner == "":
+		GameState.request_claim(index)
+		return
+
+	if owner != Net.player_name and Net.player_name != "":
+		GameState.say.emit(String(hs["name"]),
+			"%s's clearing. You are welcome to help — water anything you like." % owner)
+		return
+
 	var first := GameState.PLOT_COLS * GameState.PLOT_ROWS \
 		+ index * GameState.HOMESTEAD_COLS * GameState.HOMESTEAD_ROWS
 	var last := first + GameState.HOMESTEAD_COLS * GameState.HOMESTEAD_ROWS

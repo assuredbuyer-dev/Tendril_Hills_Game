@@ -39,6 +39,7 @@ instant.
 | **2** | switch seed — or, while building, switch what you're placing |
 | **3** | place something you crafted, **E** to put it down, **3** to cancel |
 | **H** | show/hide the controls card |
+| **E** at a signpost | claim that clearing as yours |
 | **F9** | wipe the save and start over |
 
 **Your belly is a carrot, not a stick.** Nothing bad happens at zero.
@@ -60,6 +61,12 @@ direction, not a search.
 All of it is two lists — `Terrain.HOMESTEADS` and `World.POCKETS`. Add
 a row to either and a whole new place appears, terrain and signpost and
 soil included.
+
+**Up to eight of you, on one wifi.** One machine clicks *Host
+Tendril Hills*; everyone else sees its name in a list and clicks it.
+No addresses to type. Each player claims a clearing by pressing **E**
+at its signpost, and from then on the world is shared but your
+pockets are not — see `docs/MULTIPLAYER.md`.
 
 **Two economies, two jobs.** Coins come from farming and buy seeds.
 Materials come from walking around — toadstools, stones and fallen
@@ -118,6 +125,8 @@ TendrilHills3D/
 │
 ├── autoload/              ── global services ──
 │   ├── controls.gd        Key bindings, in readable code.
+│   ├── net.gd             Hosting, joining, and finding the host on
+│   │                      the wifi without typing an address.
 │   ├── game_state.gd      ★ THE GAME. Every rule lives here.
 │   ├── save_manager.gd    JSON save, autosave, save-on-background.
 │   └── sfx.gd             Procedural sounds. Drop real .wav files in
@@ -129,8 +138,12 @@ TendrilHills3D/
     ├── world/plot_view.gd One patch of soil and whatever's in it.
     ├── player/player.gd   Movement, camera, interaction, build mode.
     ├── ui/hud.gd          The clay interface.
+    ├── ui/lobby.gd        Name box, Host, and who to join.
+    ├── world/remote_player.gd  Somebody else's Sprite.
     └── dev/
         ├── capture.gd     Screenshot harness (see §7).
+        ├── bench.gd       Draw-call and frame-time counter (§7b).
+        ├── nettest.gd     Two processes, one socket (§6).
         └── selftest.gd    Presses every button, checks the result (§6).
 ```
 
@@ -216,6 +229,16 @@ reload — and checks what comes back, including the cases that should
 politely refuse (planting with no seeds, buying with no coins, a house
 on top of a house). Run it before you trust a change.
 
+```bash
+./tools/nettest.sh
+```
+
+Starts a real host and a real guest as two separate processes and
+makes the guest prove things about the host's world. `selftest.sh`
+**cannot** catch a multiplayer bug — on one machine every networked
+call short-circuits to "I have authority, just do it". Both run in CI
+on every push.
+
 It fails on any script error, not just a failed assertion. GDScript
 prints a runtime error and then *keeps going*, so a game can throw on
 every single action while every test still reports green. That is
@@ -274,7 +297,12 @@ has how.
 - The font is Godot's default. A rounded friendly face (Art Bible §6)
   is a one-line theme change once you pick one.
 - No touch controls yet — this build targets Mac and browser.
-- **Single player.** The four homesteads are laid out for four
-  players and the shared/private split is already drawn on the map,
-  but nobody can join yet. Same-house co-op over the local network is
-  the next build.
+- **Multiplayer is same-house only**, and Mac only — ENet is UDP and
+  a browser cannot open a UDP socket. The web export still builds; it
+  just runs single-player.
+- **The host machine is the world.** Pick one and keep it. If
+  different laptops host on different days you get diverging worlds
+  with no way to merge them.
+- **Quests and the portal are per-player**, not shared. Everyone gets
+  their own onboarding and their own countdown.
+- No chat, and players walk through each other.

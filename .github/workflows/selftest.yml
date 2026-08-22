@@ -60,3 +60,22 @@ jobs:
         env:
           GODOT: /home/runner/godot/godot
         run: ./tools/selftest.sh
+
+      # Two real processes over a real socket. The self-test above
+      # runs entirely on one machine, where every networked call
+      # short-circuits to "I have authority, just do it" -- so it
+      # cannot see a multiplayer bug at all. This can.
+      - name: Run the two-machine network test
+        env:
+          GODOT: /home/runner/godot/godot
+        run: ./tools/nettest.sh
+
+      # Both logs, but only when something went wrong -- they are
+      # what you need to read and nobody wants them on a green run.
+      - name: Keep the network logs if it failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nettest-logs
+          path: .nettest/*.log
+          if-no-files-found: ignore
