@@ -349,3 +349,87 @@ func name_of(id: int) -> String:
 	if roster.has(id):
 		return String(roster[id]["name"])
 	return "Sprite"
+
+
+# =============================================================
+#  Join codes — the way that works on an iPad
+# -------------------------------------------------------------
+# The beacon above is Mac-only and always will be. iOS requires
+# the com.apple.developer.networking.multicast entitlement to send
+# OR receive a UDP broadcast, it is a restricted entitlement you
+# have to apply to Apple for, and Bonjour browsing for a custom
+# service type needs the same one. So an iPad cannot see the
+# host list, no matter how it is written.
+#
+# A join code sidesteps the whole thing. A direct connection to a
+# known address is ordinary traffic and is allowed everywhere
+# (iOS shows a one-time "allow local network access" prompt).
+#
+# The trick is that everyone in a house is on the same /24, so
+# only the LAST number of the address differs. The host shows
+# that number; a guest glues it onto its own subnet. Two or three
+# digits, typeable by a seven-year-old, and no entitlement.
+#
+# When that assumption is wrong -- two subnets, a mesh router
+# handing out 10.x to some devices -- the full address still
+# works, so the lobby accepts either.
+# =============================================================
+
+## This machine's address on the house network, or "" if it is not
+## on one. Loopback and link-local are skipped: neither is an
+## address anybody else can reach.
+func local_ip() -> String:
+	var best := ""
+	for addr in IP.get_local_addresses():
+		var a := String(addr)
+		if not _is_ipv4(a):
+			continue
+		if a.begins_with("127.") or a.begins_with("169.254."):
+			continue
+		if _is_private(a):
+			return a          # a house address; take it immediately
+		if best == "":
+			best = a
+	return best
+
+
+## The short number to read out. "" if we cannot work one out.
+func join_code() -> String:
+	var ip := local_ip()
+	if ip == "":
+		return ""
+	return ip.get_slice(".", 3)
+
+
+## Turn whatever was typed into something to connect to. Accepts a
+## full address as-is, or a bare number glued onto our own subnet.
+func resolve_code(typed: String) -> String:
+	var t := typed.strip_edges()
+	if t == "":
+		return ""
+	if t.count(".") == 3:
+		return t                      # they typed the whole thing
+	if not t.is_valid_int():
+		return ""
+	var mine := local_ip()
+	if mine == "":
+		return ""
+	var n := int(t)
+	if n < 0 or n > 255:
+		return ""
+	return "%s.%s.%s.%d" % [mine.get_slice(".", 0), mine.get_slice(".", 1),
+		mine.get_slice(".", 2), n]
+
+
+static func _is_ipv4(a: String) -> bool:
+	return a.count(".") == 3 and not a.contains(":")
+
+
+## The three ranges routers hand out at home.
+static func _is_private(a: String) -> bool:
+	if a.begins_with("192.168.") or a.begins_with("10."):
+		return true
+	if a.begins_with("172."):
+		var second := int(a.get_slice(".", 1))
+		return second >= 16 and second <= 31
+	return false

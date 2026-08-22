@@ -524,3 +524,59 @@ Discovery is reported but not asserted there. Whether a UDP broadcast
 comes back depends on the network, and a CI runner is not a living
 room — failing builds over that would teach everyone to ignore red
 X's, which costs more than the coverage is worth.
+
+---
+
+## iPads join by number, because Apple says so
+
+*Added 21 Aug 2026, when one of the kids turned out to be on a tablet
+rather than a MacBook.*
+
+The auto-discovery beacon built the day before — host shouts its name
+on the local network, everyone else turns it into a button — is
+**Mac-only and permanently so**. iOS requires the
+`com.apple.developer.networking.multicast` entitlement to send *or
+receive* a UDP broadcast; it is a restricted entitlement you apply to
+Apple for, and Bonjour browsing for a custom service type needs the
+same one. Enforced from iOS 16.
+
+Options considered:
+
+1. **Apply for the entitlement.** Weeks of latency, an approval that
+   may not come for a family game, and a permanent dependency on
+   Apple's goodwill for the game to be joinable.
+2. **Type the IP address.** Works everywhere, and is unusable by a
+   seven-year-old.
+3. **Join number.** The host shows the last octet of its address; the
+   guest glues it onto its own subnet. Two or three digits.
+
+Three won. Everyone in a house is on the same /24, so only the last
+number differs — which turns "192.168.1.47" into "47". Where that
+assumption fails (a mesh router handing out a second range) the box
+also accepts a full address, and the host displays both.
+
+The Mac list stays, because it already works and clicking a name
+beats typing a number. Two paths into the same lobby is worth it: the
+better one where it's available, the universal one everywhere.
+
+### Touch controls: buttons fake keys, the stick does not
+
+The on-screen buttons call `Input.action_press` / `action_release`,
+so every `Input.is_action_just_pressed("interact")` already in the
+game works on a tablet unchanged. There is no touch branch anywhere
+in the gameplay code and no second path to keep in step.
+
+The thumbstick cannot do that — an action is on or off, and walking
+slowly is the whole reason a stick exists — so it alone writes an
+analog vector to `Controls.touch_move`, which the player blends with
+the keyboard by taking whichever is pushed harder.
+
+Worth being explicit about the asymmetry: it would have been tidier
+to route both through the same mechanism, and doing so would have
+meant either losing analog movement or rewriting every input read in
+the game. One narrow exception was cheaper than either.
+
+The touch layer appears on `OS.has_feature("mobile")` or `--touch`,
+never by sniffing for a touchscreen — a MacBook with a tablet plugged
+in reports one, and a kid on a laptop does not want a thumbstick over
+their game.

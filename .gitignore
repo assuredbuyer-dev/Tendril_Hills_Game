@@ -29,3 +29,6 @@ build/
 # Two-process network test scratch (tools/nettest.sh): two throwaway
 # save directories and two logs, rewritten on every run.
 .nettest/
+
+# Tablet-layout screenshots from ./tools/shots.sh --touch
+.shots_touch/

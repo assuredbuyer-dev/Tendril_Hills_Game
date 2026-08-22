@@ -40,3 +40,37 @@ func _ready() -> void:
 			var ev := InputEventKey.new()
 			ev.physical_keycode = keycode
 			InputMap.action_add_event(action, ev)
+
+
+# =============================================================
+#  Touch
+# -------------------------------------------------------------
+# The on-screen stick writes its position here and the player
+# reads it, blended with the keyboard. Buttons do NOT go through
+# this: they synthesise real input actions instead (see
+# touch_controls.gd), so every existing `Input.is_action_pressed`
+# in the game keeps working untouched on a tablet.
+#
+# Only the stick needs a back channel, because it is analog and an
+# action is on or off. Half-speed walking is the whole point of a
+# thumbstick and it cannot be faked with a key.
+# =============================================================
+
+## -1..1 on each axis, same convention as Input.get_vector.
+var touch_move: Vector2 = Vector2.ZERO
+## -1..1, how hard the camera is being swung.
+var touch_cam: float = 0.0
+
+
+## Should the game draw an on-screen stick and buttons?
+##
+## Not "is this iOS" — a Mac with a touch-bar or a plugged-in
+## tablet reports a touchscreen too, and a kid on a MacBook does
+## not want a thumbstick over their game. Touch UI appears when
+## the device is genuinely touch-first, or when asked for.
+static func wants_touch_ui() -> bool:
+	if "--touch" in OS.get_cmdline_user_args():
+		return true
+	if "--no-touch" in OS.get_cmdline_user_args():
+		return false
+	return OS.has_feature("mobile")

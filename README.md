@@ -40,6 +40,10 @@ instant.
 | **3** | place something you crafted, **E** to put it down, **3** to cancel |
 | **H** | show/hide the controls card |
 | **E** at a signpost | claim that clearing as yours |
+
+On a tablet the same actions are on-screen buttons, and your left
+thumb walks. They appear only on touch devices; `./tools/shots.sh
+--touch` shows you that layout from a Mac.
 | **F9** | wipe the save and start over |
 
 **Your belly is a carrot, not a stick.** Nothing bad happens at zero.
@@ -63,8 +67,10 @@ a row to either and a whole new place appears, terrain and signpost and
 soil included.
 
 **Up to eight of you, on one wifi.** One machine clicks *Host
-Tendril Hills*; everyone else sees its name in a list and clicks it.
-No addresses to type. Each player claims a clearing by pressing **E**
+Tendril Hills*; the other Macs see its name in a list and click it.
+No addresses to type. iPads type a two-digit join number instead,
+because Apple will not let an app hear the broadcast that fills that
+list — `docs/IPAD.md` has the whole story. Each player claims a clearing by pressing **E**
 at its signpost, and from then on the world is shared but your
 pockets are not — see `docs/MULTIPLAYER.md`.
 
@@ -139,6 +145,7 @@ TendrilHills3D/
     ├── player/player.gd   Movement, camera, interaction, build mode.
     ├── ui/hud.gd          The clay interface.
     ├── ui/lobby.gd        Name box, Host, and who to join.
+    ├── ui/touch_controls.gd  Thumbstick and buttons, tablets only.
     ├── world/remote_player.gd  Somebody else's Sprite.
     └── dev/
         ├── capture.gd     Screenshot harness (see §7).
@@ -296,7 +303,10 @@ has how.
   take over with no code change.
 - The font is Godot's default. A rounded friendly face (Art Bible §6)
   is a one-line theme change once you pick one.
-- No touch controls yet — this build targets Mac and browser.
+- Touch controls are drawn for tablets and hidden on a Mac. See
+  `docs/IPAD.md` for getting a build onto an iPad — it needs Xcode and
+  an Apple signing identity, and the auto-discovery list does not work
+  there (Apple blocks the broadcast), so iPads join by typing a number.
 - **Multiplayer is same-house only**, and Mac only — ENet is UDP and
   a browser cannot open a UDP socket. The web export still builds; it
   just runs single-player.

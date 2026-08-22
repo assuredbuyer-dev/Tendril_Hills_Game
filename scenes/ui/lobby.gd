@@ -24,6 +24,7 @@ var _name_edit: LineEdit
 var _host_list: VBoxContainer
 var _status: Label
 var _root: VBoxContainer
+var _code_edit: LineEdit
 
 
 func _ready() -> void:
@@ -98,6 +99,28 @@ func _ready() -> void:
 	_host_list.add_theme_constant_override("separation", 6)
 	_root.add_child(_host_list)
 
+	# The typed way in. Always shown, because it is the ONLY way in
+	# on an iPad -- Apple will not let the game listen for the
+	# broadcast that fills the list above. See Net's join-code notes.
+	var code_row := HBoxContainer.new()
+	code_row.add_theme_constant_override("separation", 8)
+	_code_edit = LineEdit.new()
+	_code_edit.placeholder_text = "or type the join number"
+	_code_edit.max_length = 15
+	_code_edit.add_theme_font_size_override("font_size", 20)
+	_code_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_field(_code_edit)
+	_code_edit.text_submitted.connect(func(_t): _join_by_code())
+	code_row.add_child(_code_edit)
+	var go := Button.new()
+	go.text = "Go"
+	go.custom_minimum_size = Vector2(72, 44)
+	go.add_theme_font_size_override("font_size", 20)
+	_style_button(go)
+	go.pressed.connect(_join_by_code)
+	code_row.add_child(go)
+	_root.add_child(code_row)
+
 	_status = Label.new()
 	_status.add_theme_color_override("font_color", Palette.UI_TEXT_SOFT)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -121,9 +144,30 @@ func _start_solo() -> void:
 
 func _start_host() -> void:
 	_save_name()
-	if Net.host_game(_clean_name()):
-		_status.text = "Your world is open. The others should see your name now."
-		_finish()
+	if not Net.host_game(_clean_name()):
+		return
+	# The host has to be able to read its number out loud, because
+	# that is how the iPad gets in. Held on screen rather than
+	# flashed, so it can be found again mid-game.
+	var code := Net.join_code()
+	if code != "":
+		# One format call, not a concatenation of them. `%` binds
+		# tighter than `+`, so splitting this across lines with + would
+		# feed both arguments to the last fragment and throw.
+		GameState.say.emit("Tendril Hills is open",
+			("Others on this wifi can pick your name from the list.\n"
+			+ "On an iPad, type the join number:  %s\n"
+			+ "(the full address is %s)") % [code, Net.local_ip()])
+	_finish()
+
+
+func _join_by_code() -> void:
+	var typed := _code_edit.text
+	var ip := Net.resolve_code(typed)
+	if ip == "":
+		_status.text = "That did not look like a join number. Ask the host for the number on their screen."
+		return
+	_join(ip)
 
 
 func _join(ip: String) -> void:

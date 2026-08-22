@@ -16,6 +16,7 @@ var world: World
 var player: Player
 var hud: Hud
 var lobby: Lobby
+var touch: TouchControls
 
 
 ## True for the headless harnesses, which must never see a menu.
@@ -41,6 +42,13 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.name = "Hud"
 	add_child(hud)
+
+	# A thumbstick and buttons, but only on a device that needs them.
+	# See Controls.wants_touch_ui -- a MacBook never gets these.
+	if Controls.wants_touch_ui():
+		touch = TouchControls.new()
+		touch.name = "Touch"
+		add_child(touch)
 
 	player.target_changed.connect(_on_target_changed)
 	player.wants_shop.connect(func(): hud.toggle_shop())

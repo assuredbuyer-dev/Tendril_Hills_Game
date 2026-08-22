@@ -161,8 +161,14 @@ func _dock_top_right(n: Control) -> void:
 		Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_END)
 
 
+## Bottom-left is where the belly bar and the basket live -- and on
+## a tablet it is also where the thumbstick lands. The panel moves up
+## and out of the way rather than the stick moving, because a
+## thumbstick anywhere but the bottom corner is uncomfortable to hold
+## and a panel is happy anywhere.
 func _dock_bottom_left(n: Control) -> void:
-	_dock(n, 0.0, 1.0, Vector2(PAD, -PAD),
+	var lift := 232.0 if Controls.wants_touch_ui() else 0.0
+	_dock(n, 0.0, 1.0, Vector2(PAD, -PAD - lift),
 		Control.GROW_DIRECTION_END, Control.GROW_DIRECTION_BEGIN)
 
 
@@ -686,7 +692,28 @@ func _build_help() -> void:
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 3)
 	col.add_child(label("How to tend Tendril Hills", 18, Palette.EARTH_DARK))
+	# Two sets, because a card that says "WASD — walk" is worse than
+	# no card at all on a tablet -- it tells a kid the game is broken.
 	var lines := [
+		"Left thumb — walk",
+		"Jump — jump",
+		"< and > — swing the camera",
+		"E — do the obvious thing",
+		"   grass → till → plant → water → harvest",
+		"Eat — eat from your basket",
+		"Seed — switch seed type",
+		"E on a toadstool, stone or branch — pick it up",
+		"Build — place what you crafted",
+		"Pip's stall: buy seeds, sell your basket.",
+		"Workbench: turn gathered bits into things to build.",
+		"Crops keep growing while the game is closed.",
+		"",
+		"Walk out to a corner of the map and you will find a clearing",
+		"with a name on a signpost. That one is yours — it has its own",
+		"soil and room to build. North, south, east and west there are",
+		"places thick with stone, branches or toadstools.",
+		"Tap this card to hide it.",
+	] if Controls.wants_touch_ui() else [
 		"WASD / arrows — walk",
 		"Space — jump",
 		"Q / R — swing the camera",
@@ -710,6 +737,14 @@ func _build_help() -> void:
 		col.add_child(label(line, 13, Palette.UI_TEXT_SOFT))
 	_help = _wrap(col, Palette.UI_PANEL, 22)
 	_dock_right(_help)
+	# On a tablet there is no H key, so the card itself is the button.
+	if Controls.wants_touch_ui():
+		_help.mouse_filter = Control.MOUSE_FILTER_STOP
+		_help.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventScreenTouch and (ev as InputEventScreenTouch).pressed:
+				_help.visible = false
+			elif ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed:
+				_help.visible = false)
 	# Visible while you find your feet, then it steps out of the way.
 	_retire_help()
 

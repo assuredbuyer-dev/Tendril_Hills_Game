@@ -176,3 +176,35 @@ which is a lot of machinery for a build nobody in this house uses.
   push each other off cliffs, and that is a different game.
 - **The host can't hand over.** If the host quits, everyone drops to
   single-player until it comes back.
+
+---
+
+## iPads
+
+They can play. Two things are different, and one of them is Apple's
+decision rather than a choice made here.
+
+**They join by number, not from the list.** iOS requires the
+`com.apple.developer.networking.multicast` restricted entitlement to
+send *or receive* a UDP broadcast, and it must be applied for. That
+broadcast is what fills the host list, so an iPad cannot see it —
+however the code is written. Instead the host displays a two- or
+three-digit join number and the iPad types it. It's the last part of
+the host's address; the iPad glues it onto its own, which works
+because a house is one network. The full address is shown too, for
+the rare setup where that assumption breaks.
+
+Ordinary connecting is fine — a direct connection to a known address
+is normal traffic. iOS shows a one-time "allow local network access"
+prompt, which must be accepted or the join silently fails.
+
+**Touch controls appear automatically**, and only on touch devices.
+The buttons synthesise real input actions
+(`Input.action_press`/`action_release`), so every
+`Input.is_action_pressed` already in the game works on a tablet with
+no second code path. Only the thumbstick needs a back channel
+(`Controls.touch_move`), because an action is on or off and analog
+walking is the entire point of a stick.
+
+Getting a build onto an iPad — Xcode, signing, the Info.plist entry
+that makes the permission prompt appear — is in `docs/IPAD.md`.

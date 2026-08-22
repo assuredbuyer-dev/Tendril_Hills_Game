@@ -18,6 +18,11 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$PROJECT_DIR/.shots"
 
+# ./tools/shots.sh --touch photographs the tablet layout -- the
+# thumbstick, the buttons and the lifted HUD -- from a Mac, with no
+# iPad in the room. Anything else you pass is handed to the game too.
+EXTRA_ARGS="$*"
+
 # --- Find the Godot binary -----------------------------------
 find_godot() {
   if command -v godot >/dev/null 2>&1; then command -v godot; return; fi
@@ -71,7 +76,7 @@ echo
 "$GODOT" --path "$PROJECT_DIR" \
          --rendering-driver opengl3 \
          --quit-after 900 \
-         -- --shots --out="res://.shots"
+         -- --shots --out="res://.shots" ${EXTRA_ARGS:-}
 
 echo
 COUNT=$(find "$OUT_DIR" -name '*.png' | wc -l | tr -d ' ')

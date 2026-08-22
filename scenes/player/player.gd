@@ -153,7 +153,12 @@ func _build_camera_rig() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Keyboard and thumbstick, blended rather than switched between.
+	# Whichever is pushed harder wins, so a tablet with a keyboard
+	# paired to it works with either hand and neither cancels out.
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	if Controls.touch_move.length() > input.length():
+		input = Controls.touch_move
 	# Movement is camera-relative: "up" always means "away from you".
 	var basis_dir := Vector3(input.x, 0, input.y).rotated(Vector3.UP, _cam_yaw)
 	# A full belly makes the Sprite bouncy; an empty one makes it trudge.

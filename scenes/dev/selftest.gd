@@ -41,6 +41,7 @@ func run() -> void:
 	_test_placing()
 	_test_scarecrow_and_hive()
 	_test_registry()
+	_test_join_codes()
 	_test_world_size()
 	_test_homesteads()
 	await _test_jump()
@@ -314,6 +315,47 @@ func _test_registry() -> void:
 # points? This is the real question "can the Sprite walk through it?"
 # reduced to one ray, and it is the only way to check collision without
 # a human at the keyboard.
+# The join code is the ONLY way onto an iPad, because Apple will
+# not let the game hear the discovery broadcast. If this string
+# handling is wrong the tablet simply cannot join, and the symptom
+# is a spinner rather than an error -- so it gets tested.
+func _test_join_codes() -> void:
+	print("\n-- join codes --")
+	# A full address is passed straight through.
+	check(Net.resolve_code("192.168.1.47") == "192.168.1.47",
+		"a full address is used as typed")
+	check(Net.resolve_code("  10.0.0.5  ") == "10.0.0.5",
+		"stray spaces around an address are ignored")
+
+	# Nonsense must be refused rather than turned into a wrong address.
+	for junk in ["", "banana", "999", "-4", "1.2.3", "1.2.3.4.5"]:
+		check(Net.resolve_code(junk) == "",
+			"refuses '%s' instead of guessing" % junk)
+
+	# A bare number is glued onto our own subnet. Only meaningful if
+	# this machine actually has a network address, which a CI runner
+	# in a container may not.
+	var mine := Net.local_ip()
+	if mine == "":
+		print("  ..   no local address here; the bare-number path is untested")
+	else:
+		var joined := Net.resolve_code("47")
+		check(joined.count(".") == 3, "a bare number becomes a full address")
+		check(joined.ends_with(".47"), "and keeps the number that was typed")
+		var want := "%s.%s.%s." % [mine.get_slice(".", 0), mine.get_slice(".", 1),
+			mine.get_slice(".", 2)]
+		check(joined.begins_with(want),
+			"and sits on our own subnet (%s)" % want)
+		check(Net.join_code() == mine.get_slice(".", 3),
+			"the code we show others is our own last number")
+
+	check(Net._is_private("192.168.1.9"), "192.168.x.x is a home address")
+	check(Net._is_private("10.1.2.3"), "10.x.x.x is a home address")
+	check(Net._is_private("172.16.0.1"), "172.16.x.x is a home address")
+	check(not Net._is_private("172.32.0.1"), "172.32.x.x is not")
+	check(not Net._is_private("8.8.8.8"), "and neither is the open internet")
+
+
 # The map got four times bigger once. Everything that quietly
 # assumed 34 metres broke, and most of it broke somewhere you only
 # see by walking there. These checks are the tripwires for the next
