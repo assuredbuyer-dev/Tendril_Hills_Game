@@ -193,7 +193,49 @@ Everything after that is the App Store Connect flow you already know.
 
 ---
 
-## 8. When something goes wrong
+---
+
+## 8. Testing on an old iPad first
+
+Sensible — but an old iPad can mislead you in two directions, so
+know both before you draw conclusions from it.
+
+**It must be arm64.** Godot 4 builds arm64 only; there is no armv7.
+In practice that means iPad Air (1st gen), iPad mini 2, or iPad
+5th generation and newer. Plug it in and pick it as the destination
+in Xcode: if it is too old, Xcode greys it out and says so
+immediately. Thirty seconds, not an afternoon.
+
+**⚠ The discovery list may work on an old iPad and NOT on a new
+one.** Apple's own note on the local-network rules says the
+restrictions are "not enforced on iOS 14 and 15" and "should be
+correctly enforced by iOS 16 and later."
+
+So if your old iPad runs iOS 15 or earlier, it may well see the host
+list — and your son's newer iPad will not, no matter what you do.
+Do not test with the list and conclude it works.
+
+**Test with the join number.** That is the path that works on every
+device, and it is the one he will actually use. If the number works
+on the old iPad, it will work on his.
+
+**Judging whether it is fast enough.** Tap the **?** button
+(bottom row) to bring up the controls card. At the foot of it is a
+live readout: frames per second, draw calls, and how many people are
+playing. There is no console on an iPad and no way to pass it a
+flag, so this is the only way to get a real answer from the device.
+
+Roughly: 60 fps is fine, 30 is playable for a cosy game, below 20 is
+not. If it struggles, the numbers to change are `TREE_FADE` and
+`CLUTTER_FADE` in `scenes/world/world.gd` and the shadow distance in
+`_build_environment` — `docs/DECISIONS.md` explains what each costs.
+An old iPad may simply not have the fill rate, in which case that
+tells you something useful about your son's iPad too, depending on
+which is newer.
+
+---
+
+## 9. When something goes wrong
 
 **The iPad joins and immediately drops.** Almost always the local
 network permission. Settings → Tendril Hills → Local Network.

@@ -153,6 +153,12 @@ func _build_buttons() -> void:
 		Vector2(-MARGIN - 152.0, -MARGIN - 132.0))
 	_action_button(">", 62, Palette.UI_PANEL_DIM, "cam_right",
 		Vector2(-MARGIN - 80.0, -MARGIN - 132.0))
+	# There is no H key on a tablet, so without this the controls card
+	# can be dismissed and never brought back. It also carries the
+	# live fps readout, which is the only way to judge an old iPad.
+	_action_button("?", 52, Palette.UI_PANEL_DIM, "toggle_help",
+		Vector2(-MARGIN - 448.0, -MARGIN))
+
 	# The keyboard's 1/2/3. In a row along the bottom rather than a
 	# column up the right edge, which ran straight through the help
 	# card and the quest list.

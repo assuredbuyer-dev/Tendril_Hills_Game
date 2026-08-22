@@ -14,6 +14,8 @@ extends CanvasLayer
 
 const PAD := 18
 
+var _perf_label: Label
+var _perf_accum: float = 0.0
 var _roster_panel: PanelContainer
 var _roster_box: VBoxContainer
 var _coin_label: Label
@@ -89,6 +91,25 @@ func _process(delta: float) -> void:
 		_dialogue_timer -= delta
 		if _dialogue_timer <= 0.0:
 			_fade_out(_dialogue)
+	_refresh_perf(delta)
+
+
+## Live fps and draw calls, at the foot of the controls card.
+##
+## Cheap on purpose: only while the card is actually on screen, and
+## only twice a second. A performance readout that costs performance
+## is a joke with a long setup.
+func _refresh_perf(delta: float) -> void:
+	if _perf_label == null or _help == null or not _help.visible:
+		return
+	_perf_accum += delta
+	if _perf_accum < 0.5:
+		return
+	_perf_accum = 0.0
+	var calls := RenderingServer.get_rendering_info(
+		RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+	_perf_label.text = "%d fps   ·   %d draw calls   ·   %d players" % [
+		int(Engine.get_frames_per_second()), calls, Net.player_count()]
 
 
 # =============================================================
@@ -735,6 +756,15 @@ func _build_help() -> void:
 	]
 	for line in lines:
 		col.add_child(label(line, 13, Palette.UI_TEXT_SOFT))
+	# Live performance, at the foot of the card. There is no console on
+	# an iPad and no way to pass a flag to it, so this is the only way
+	# to answer "is this old thing fast enough" from the device itself.
+	# Draw calls matter more than fps here: fps tells you it is slow,
+	# draw calls tell you why. See tools/bench.sh.
+	col.add_child(HSeparator.new())
+	_perf_label = label("", 13, Palette.UI_TEXT_SOFT)
+	col.add_child(_perf_label)
+
 	_help = _wrap(col, Palette.UI_PANEL, 22)
 	_dock_right(_help)
 	# On a tablet there is no H key, so the card itself is the button.
